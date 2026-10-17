@@ -325,7 +325,7 @@ def test_sheds_in_complete_window() -> None:
     assert "switch.a" in ctrl._shed
 
 
-# --- controller: priority, timing, guard, persistence ---------------------
+# --- controller: priority, timing, persistence ----------------------------
 
 
 def _run(ctrl, snap, now: datetime) -> None:
@@ -396,34 +396,6 @@ def test_restores_one_device_at_a_time_last_shed_first() -> None:
     assert hass.services.calls[-1] == ("switch", "turn_on", "switch.a")
 
 
-def test_restored_device_is_guarded_for_15_minutes() -> None:
-    hass = FakeHass()
-    hass.states.set("switch.a", "off")
-    ctrl = _controller(hass, {"switch.a": _record()})
-
-    _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(20))  # restored
-    assert hass.services.calls == [("switch", "turn_on", "switch.a")]
-
-    _run(ctrl, _snap(), at(25))  # overload again, but guard is active
-    assert [c for c in hass.services.calls if c[1] == "turn_off"] == []
-
-    _run(ctrl, _snap(), at(36))  # 16 min after restore
-    assert ("switch", "turn_off", "switch.a") in hass.services.calls
-
-
-def test_guard_falls_through_to_next_device() -> None:
-    hass = FakeHass()
-    hass.states.set("switch.a", "on")
-    hass.states.set("switch.b", "on")
-    ctrl = _controller(hass, devices=("switch.a", "switch.b"))
-    _clock["now"] = at(5)
-    ctrl._restored_at["switch.a"] = at(0)  # restored 5 min ago
-
-    _run(ctrl, _snap(), at(5))
-
-    assert hass.services.calls == [("switch", "turn_off", "switch.b")]
-
-
 def test_dropped_records_are_persisted() -> None:
     hass = FakeHass()  # switch.a has no state -> record is dropped
     ctrl = _controller(hass, {"switch.a": _record()})
@@ -450,18 +422,6 @@ def test_shed_list_survives_restart() -> None:
     ctrl2._store.async_load = _load
     asyncio.run(ctrl2.async_load())
     assert "switch.a" in ctrl2._shed
-
-
-def test_force_shed_ignores_projection_and_guard() -> None:
-    hass = FakeHass()
-    hass.states.set("switch.a", "on")
-    ctrl = _controller(hass)
-    _clock["now"] = at(5)
-    ctrl._restored_at["switch.a"] = at(4)
-
-    assert asyncio.run(ctrl.async_force_shed()) == "switch.a"
-    assert ("switch", "turn_off", "switch.a") in hass.services.calls
-    assert "switch.a" in ctrl._shed
 
 
 def test_force_shed_needs_shedding_enabled() -> None:
@@ -491,3 +451,46 @@ def test_water_heater_operation_mode_is_restored() -> None:
         if c[1] == "set_operation_mode"
     )
     assert payload["operation_mode"] == "eco"
+
+
+def test_first_priority_device_is_always_shed_first() -> None:
+    """After a restore the first device is shed again right away (no guard)."""
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "on")
+    ctrl = _controller(hass, devices=("switch.a", "switch.b"))
+
+    _run(ctrl, _snap(), at(0, 10))  # a shed
+    hass.states.set("switch.a", "off")
+    _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(20))  # a restored
+    hass.services.calls.clear()
+
+    _run(ctrl, _snap(), at(21))  # overload again -> a first, not b
+
+    assert hass.services.calls == [("switch", "turn_off", "switch.a")]
+
+
+def test_shed_device_stays_off_for_min_off_time() -> None:
+    """Even with a very low projection nothing comes back before 15 minutes."""
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+
+    _run(ctrl, _snap(), at(0, 10))  # shed at 20:00:10
+    for minute in (5, 10, 14):
+        _run(ctrl, _snap(projected_average=0.0), at(minute))
+    assert [c for c in hass.services.calls if c[1] == "turn_on"] == []
+
+    _run(ctrl, _snap(projected_average=0.0), at(15, 30))
+    assert ("switch", "turn_on", "switch.a") in hass.services.calls
+
+
+def test_force_shed_sheds_next_device() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+    _clock["now"] = at(5)
+
+    assert asyncio.run(ctrl.async_force_shed()) == "switch.a"
+    assert ("switch", "turn_off", "switch.a") in hass.services.calls
+    assert "switch.a" in ctrl._shed

@@ -17,7 +17,6 @@ from .const import (
     DEFAULT_STABILIZATION_SECONDS,
     DEFAULT_THRESHOLD_W,
     DOMAIN,
-    RESTORE_GUARD_MINUTES,
     RESTORE_STAGGER_SECONDS,
     SHED_ACTION_COOLDOWN_SECONDS,
     SHED_TARIFF_BLOCKS,
@@ -59,8 +58,6 @@ class LoadShedController:
         self._lock = asyncio.Lock()
         self._last_action: datetime | None = None
         self._action_cooldown: float = float(SHED_ACTION_COOLDOWN_SECONDS)
-        # entity_id -> when we auto-restored it (in memory; guards against flapping)
-        self._restored_at: dict[str, datetime] = {}
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
 
     @property
@@ -116,12 +113,12 @@ class LoadShedController:
         self.coordinator.async_request_refresh_ui()
 
     async def async_force_shed(self) -> str | None:
-        """Shed the next device in priority order now (ignores projection/guard)."""
+        """Shed the next device in priority order now (ignores the projection)."""
         if not self.enabled:
             _LOGGER.warning("force_shed ignored: load shedding is disabled")
             return None
         async with self._lock:
-            shed = await self._shed_next(ignore_guard=True)
+            shed = await self._shed_next()
             if shed:
                 self._mark_action(SHED_ACTION_COOLDOWN_SECONDS)
                 await self.async_save()
@@ -205,16 +202,6 @@ class LoadShedController:
         self._last_action = dt_util.now()
         self._action_cooldown = float(cooldown_seconds)
 
-    def _restore_guarded(self, entity_id: str) -> bool:
-        """True while a just-restored device must not be shed again."""
-        restored_at = self._restored_at.get(entity_id)
-        if restored_at is None:
-            return False
-        if (dt_util.now() - restored_at) >= timedelta(minutes=RESTORE_GUARD_MINUTES):
-            self._restored_at.pop(entity_id, None)
-            return False
-        return True
-
     async def _restore_step(
         self, tariff: int, projected: float, limit: float
     ) -> None:
@@ -249,12 +236,10 @@ class LoadShedController:
             await self.async_save()
             self.coordinator.async_request_refresh_ui()
 
-    async def _shed_next(self, *, ignore_guard: bool = False) -> str | None:
-        """Turn off the next on device in priority order."""
+    async def _shed_next(self) -> str | None:
+        """Turn off the next on device in priority order (first priority first)."""
         for entity_id in self.devices:
             if entity_id in self._shed:
-                continue
-            if not ignore_guard and self._restore_guarded(entity_id):
                 continue
             state = self.hass.states.get(entity_id)
             if state is None or state.state in ("unknown", "unavailable"):
@@ -303,7 +288,6 @@ class LoadShedController:
             ok = await self._turn_on(entity_id, rec.get("previous") or {})
             if ok:
                 self._shed.pop(entity_id, None)
-                self._restored_at[entity_id] = dt_util.now()
                 restored.append(entity_id)
                 _LOGGER.info("Auto-restored %s", entity_id)
                 break  # one device per step; the next one follows after a pause
@@ -321,7 +305,6 @@ class LoadShedController:
                 if state and self._is_on(entity_id, state.state):
                     continue
                 if await self._turn_on(entity_id, rec.get("previous") or {}):
-                    self._restored_at[entity_id] = dt_util.now()
                     restored.append(entity_id)
             await self.async_save()
             if restored:

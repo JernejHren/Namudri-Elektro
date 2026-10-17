@@ -12,7 +12,7 @@ restore_all:
 
 force_shed:
   name: Force shed next device
-  description: Turn off the next device in priority order right now (ignores projection and the restore guard; needs load shedding enabled).
+  description: Turn off the next device in priority order right now (ignores the projection; needs load shedding enabled).
   fields:
     entry_id:
       name: Config entry ID

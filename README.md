@@ -28,7 +28,7 @@ When projection &gt; agreed + threshold (after stabilization delay):
 4. Manual offs stay off; if you turn a shed device back on, it leaves the auto-shed list.  
 5. Restore when projection &lt; agreed − hysteresis and min-off time elapsed — **one device at a time**, 30 s apart.  
 6. Outside blocks 1–2, auto-shed devices are restored (also one by one).  
-7. **Anti-flapping:** a device that was just restored is not shed again for 15 minutes; the next device in priority order is used instead.  
+7. **Anti-flapping:** a shed device is not switched back on before the minimum off time (default 15 minutes). The first device in priority order is always shed first.  
 8. If the tariff sensor is unavailable, nothing is shed or restored until it is back.  
 9. After a Home Assistant restart/reload in the middle of a 15-minute window the projection is only estimated, so shedding waits for the next window (`window_complete` attribute).
 
@@ -67,7 +67,7 @@ Existing installs: **Configure** the integration → add devices on the shedding
 ## Services
 
 - `namudri_elektro.restore_all` — restore all auto-shed devices at once (optional `entry_id`)
-- `namudri_elektro.force_shed` — shed the next device in priority order now; ignores projection and the restore guard, needs load shedding enabled (optional `entry_id`)
+- `namudri_elektro.force_shed` — shed the next device in priority order now; ignores the projection, needs load shedding enabled (optional `entry_id`)
 
 ## License
 
