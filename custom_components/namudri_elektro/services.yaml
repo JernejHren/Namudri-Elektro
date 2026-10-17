@@ -1,0 +1,11 @@
+restore_all:
+  name: Restore all shed devices
+  description: Turn back on every device that Namudri auto-shed (ignores min off time).
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional. If omitted, restores for all Namudri instances.
+      example: "01ABCDEF"
+      required: false
+      selector:
+        text:

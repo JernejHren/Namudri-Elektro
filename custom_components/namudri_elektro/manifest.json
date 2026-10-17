@@ -1,0 +1,11 @@
+{
+  "domain": "namudri_elektro",
+  "name": "Namudri Elektro",
+  "codeowners": ["@JernejHren"],
+  "config_flow": true,
+  "documentation": "https://github.com/JernejHren/Namudri-Elektro",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/JernejHren/Namudri-Elektro/issues",
+  "requirements": [],
+  "version": "0.2.0"
+}

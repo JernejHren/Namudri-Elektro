@@ -1,0 +1,77 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Namudri Elektro",
+        "description": "Izberi Shelly (ali drug) senzor moči v W in senzor omrežninskega časovnega bloka (1–5).",
+        "data": {
+          "name": "Ime",
+          "power_sensor": "Senzor moči (W)",
+          "tariff_sensor": "Senzor tarifnega bloka"
+        }
+      },
+      "shedding": {
+        "title": "Omejitev porabe",
+        "description": "Neobvezno. Vrstni red = prioriteta (prva se izklopi najprej). Deluje samo v blokih 1 in 2. Prazno = samo monitoring.",
+        "data": {
+          "devices": "Naprave (po prioriteti)",
+          "notify_1": "Obvestilo 1 (npr. notify.mobile_app_telefon)",
+          "notify_2": "Obvestilo 2"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Ta kombinacija senzorjev je že nastavljena."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Namudri Elektro — senzorji",
+        "data": {
+          "name": "Ime",
+          "power_sensor": "Senzor moči (W)",
+          "tariff_sensor": "Senzor tarifnega bloka"
+        }
+      },
+      "shedding": {
+        "title": "Namudri Elektro — omejitev porabe",
+        "description": "Vrstni red = prioriteta. Izklop samo v blokih 1 in 2.",
+        "data": {
+          "devices": "Naprave (po prioriteti)",
+          "notify_1": "Obvestilo 1",
+          "notify_2": "Obvestilo 2"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "projected_power": { "name": "Projekcija 15 min moči" },
+      "running_average": { "name": "Tekoče 15 min povprečje" },
+      "completed_window": { "name": "Zaključeno 15 min povprečje" },
+      "agreed_power": { "name": "Dogovorjena moč (trenutni blok)" },
+      "headroom": { "name": "Razpoložljiva moč" },
+      "tariff_block": { "name": "Tarifni blok" },
+      "shed_device_count": { "name": "Število izklopljenih naprav" }
+    },
+    "binary_sensor": {
+      "over_agreed_power": { "name": "Nad dogovorjeno močjo" },
+      "shedding_active": { "name": "Omejitev aktivna" }
+    },
+    "switch": {
+      "load_shedding": { "name": "Omejitev porabe" }
+    },
+    "number": {
+      "agreed_power_t1": { "name": "Dogovorjena moč T1" },
+      "agreed_power_t2": { "name": "Dogovorjena moč T2" },
+      "agreed_power_t3": { "name": "Dogovorjena moč T3" },
+      "agreed_power_t4": { "name": "Dogovorjena moč T4" },
+      "agreed_power_t5": { "name": "Dogovorjena moč T5" },
+      "shed_threshold": { "name": "Prag za izklop" },
+      "shed_hysteresis": { "name": "Histereza za vklop" },
+      "min_off_minutes": { "name": "Minimalni čas izklopa" },
+      "stabilization_seconds": { "name": "Stabilizacija projekcije" }
+    }
+  }
+}

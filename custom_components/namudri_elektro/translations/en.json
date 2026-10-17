@@ -1,0 +1,77 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Namudri Elektro",
+        "description": "Select the Shelly (or other) power sensor in W and the Slovenian network tariff block sensor (1–5).",
+        "data": {
+          "name": "Name",
+          "power_sensor": "Power sensor (W)",
+          "tariff_sensor": "Tariff block sensor"
+        }
+      },
+      "shedding": {
+        "title": "Load shedding",
+        "description": "Optional. Priority order = list order (first shed first). Only active in tariff blocks 1 and 2. Leave empty for monitoring only.",
+        "data": {
+          "devices": "Devices (priority order)",
+          "notify_1": "Notify service 1 (e.g. notify.mobile_app_phone)",
+          "notify_2": "Notify service 2"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This combination of sensors is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Namudri Elektro — sensors",
+        "data": {
+          "name": "Name",
+          "power_sensor": "Power sensor (W)",
+          "tariff_sensor": "Tariff block sensor"
+        }
+      },
+      "shedding": {
+        "title": "Namudri Elektro — load shedding",
+        "description": "Priority order = list order. Shedding runs only in blocks 1 and 2.",
+        "data": {
+          "devices": "Devices (priority order)",
+          "notify_1": "Notify service 1",
+          "notify_2": "Notify service 2"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "projected_power": { "name": "Projected 15 min power" },
+      "running_average": { "name": "Running 15 min average" },
+      "completed_window": { "name": "Completed 15 min average" },
+      "agreed_power": { "name": "Agreed power (current block)" },
+      "headroom": { "name": "Headroom" },
+      "tariff_block": { "name": "Tariff block" },
+      "shed_device_count": { "name": "Shed device count" }
+    },
+    "binary_sensor": {
+      "over_agreed_power": { "name": "Over agreed power" },
+      "shedding_active": { "name": "Shedding active" }
+    },
+    "switch": {
+      "load_shedding": { "name": "Load shedding" }
+    },
+    "number": {
+      "agreed_power_t1": { "name": "Agreed power T1" },
+      "agreed_power_t2": { "name": "Agreed power T2" },
+      "agreed_power_t3": { "name": "Agreed power T3" },
+      "agreed_power_t4": { "name": "Agreed power T4" },
+      "agreed_power_t5": { "name": "Agreed power T5" },
+      "shed_threshold": { "name": "Shed threshold" },
+      "shed_hysteresis": { "name": "Restore hysteresis" },
+      "min_off_minutes": { "name": "Minimum off time" },
+      "stabilization_seconds": { "name": "Projection stabilization" }
+    }
+  }
+}
