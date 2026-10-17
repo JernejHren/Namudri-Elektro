@@ -1,0 +1,60 @@
+# Example Lovelace view for Namudri Elektro.
+# Entity IDs assume the default device name "Namudri Elektro";
+# adjust them if you renamed the device.
+type: vertical-stack
+cards:
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: binary_sensor.namudri_elektro_over_agreed_power
+        state: "on"
+    card:
+      type: markdown
+      content: >-
+        ⚠️ **Projected power is above the agreed power**
+        ({{ states('sensor.namudri_elektro_projected_15_min_power') | round(0) }} W,
+        block {{ states('sensor.namudri_elektro_tariff_block') }})
+
+  - type: gauge
+    entity: sensor.namudri_elektro_projected_15_min_power
+    name: Projected 15 min power
+    unit: W
+    min: 0
+    max: 12000          # set to a bit above your highest agreed power
+    needle: true
+    segments:
+      - from: 0
+        color: "#43a047"
+      - from: 7000      # set to your agreed power of the main block
+        color: "#fb8c00"
+      - from: 9000
+        color: "#e53935"
+
+  - type: entities
+    title: Namudri Elektro
+    entities:
+      - entity: sensor.namudri_elektro_tariff_block
+      - entity: sensor.namudri_elektro_agreed_power_current_block
+      - entity: sensor.namudri_elektro_projected_15_min_power
+      - entity: sensor.namudri_elektro_running_15_min_average
+      - entity: sensor.namudri_elektro_completed_15_min_average
+      - entity: sensor.namudri_elektro_headroom
+      - type: divider
+      - entity: switch.namudri_elektro_load_shedding
+      - entity: binary_sensor.namudri_elektro_shedding_active
+      - entity: sensor.namudri_elektro_shed_device_count
+
+  - type: entities
+    title: Agreed power and shed tuning
+    state_color: false
+    entities:
+      - entity: number.namudri_elektro_agreed_power_t1
+      - entity: number.namudri_elektro_agreed_power_t2
+      - entity: number.namudri_elektro_agreed_power_t3
+      - entity: number.namudri_elektro_agreed_power_t4
+      - entity: number.namudri_elektro_agreed_power_t5
+      - type: divider
+      - entity: number.namudri_elektro_shed_threshold
+      - entity: number.namudri_elektro_restore_hysteresis
+      - entity: number.namudri_elektro_minimum_off_time
+      - entity: number.namudri_elektro_projection_stabilization
