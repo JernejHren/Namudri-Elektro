@@ -237,10 +237,21 @@ def test_unknown_tariff_gives_unknown_limit() -> None:
     assert snap.headroom_w is None
     assert snap.over_limit is None
 
-    hass.states.set("sensor.t", "1")  # default agreed power T1 = 7 kW
+    hass.states.set("sensor.t", "1")
+    coord.set_agreed_kw(1, 7.0)
     snap = coord._compute()
     assert snap.over_limit is True
     assert snap.headroom_w == pytest.approx(-1000.0)
+
+
+def test_agreed_power_not_set_means_unknown_limit() -> None:
+    coord, hass = make_coordinator(power="8000", tariff="1")
+    assert coord.get_agreed_kw(1) == 0.0  # default: not set
+
+    snap = coord._compute()
+    assert snap.tariff_block == 1
+    assert snap.headroom_w is None
+    assert snap.over_limit is None
 
 
 # --- startup gate ----------------------------------------------------------

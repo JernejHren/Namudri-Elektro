@@ -97,7 +97,9 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
         suggested_display_precision=0,
-        value_fn=lambda d: d.agreed_power_w if d.tariff_block else None,
+        value_fn=lambda d: (
+            d.agreed_power_w if d.tariff_block and d.agreed_power_w > 0 else None
+        ),
         attrs_fn=lambda d: {ATTR_TARIFF_BLOCK: d.tariff_block},
     ),
     NamudriSensorDescription(

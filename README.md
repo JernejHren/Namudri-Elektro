@@ -39,7 +39,7 @@ Master switch **Load shedding** disables the controller and restores everything.
 1. Copy `custom_components/namudri_elektro` into HA (or HACS custom repo).  
 2. Restart Home Assistant.  
 3. Add **Namudri Elektro** — pick power + tariff sensors, then optional devices.  
-4. Set T1–T5 agreed power (kW) and shed tuning numbers.  
+4. Set T1–T5 agreed power (kW) and shed tuning numbers. **Agreed power defaults to 0 = not set**: until you set a block, its headroom/over-limit are unknown and nothing is shed in that block.  
 5. Enable **Load shedding** switch.
 
 Existing installs: **Configure** the integration → add devices on the shedding step → reload/restart if needed.

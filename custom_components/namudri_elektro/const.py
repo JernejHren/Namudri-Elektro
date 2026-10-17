@@ -21,13 +21,15 @@ RESTORE_STAGGER_SECONDS = 30
 # Load shedding only in expensive blocks
 SHED_TARIFF_BLOCKS = frozenset({1, 2})
 
-# Default dogovorjena obračunska moč (kW) per tariff block
+# Default dogovorjena obračunska moč (kW) per tariff block.
+# 0 = "not set": no limit is known, so nothing is reported as over the limit
+# and nothing is shed until the user sets T1–T5.
 DEFAULT_AGREED_KW = {
-    1: 7.0,
-    2: 9.0,
-    3: 11.0,
-    4: 11.0,
-    5: 11.0,
+    1: 0.0,
+    2: 0.0,
+    3: 0.0,
+    4: 0.0,
+    5: 0.0,
 }
 
 DEFAULT_THRESHOLD_W = 500.0
