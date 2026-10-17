@@ -9,7 +9,8 @@ CONF_POWER_SENSOR = "power_sensor"
 CONF_TARIFF_SENSOR = "tariff_sensor"
 CONF_NAME = "name"
 CONF_DEVICES = "devices"
-CONF_NOTIFY_1 = "notify_1"
+CONF_NOTIFY = "notify_services"  # list of notify targets picked from a list
+CONF_NOTIFY_1 = "notify_1"  # legacy free-text fields (still read for old entries)
 CONF_NOTIFY_2 = "notify_2"
 
 WINDOW_SECONDS = 900  # Slovenian network billing: 15-minute windows

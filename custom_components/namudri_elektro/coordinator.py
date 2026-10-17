@@ -17,8 +17,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DEVICES,
-    CONF_NOTIFY_1,
-    CONF_NOTIFY_2,
     CONF_POWER_SENSOR,
     CONF_TARIFF_SENSOR,
     DEFAULT_AGREED_KW,
@@ -27,6 +25,7 @@ from .const import (
     WINDOW_SECONDS,
 )
 from .controller import LoadShedController
+from .notify_helpers import notify_targets
 from .window import project_average, window_start_for
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,11 +94,7 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         self._ready: bool = False
 
         devices = list(config.get(CONF_DEVICES) or [])
-        notify = [
-            n
-            for n in (config.get(CONF_NOTIFY_1), config.get(CONF_NOTIFY_2))
-            if n
-        ]
+        notify = notify_targets(config)
         self.controller = LoadShedController(
             hass, self, entry_id, devices, notify
         )

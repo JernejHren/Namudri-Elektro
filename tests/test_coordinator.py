@@ -505,3 +505,64 @@ def test_force_shed_sheds_next_device() -> None:
     assert asyncio.run(ctrl.async_force_shed()) == "switch.a"
     assert ("switch", "turn_off", "switch.a") in hass.services.calls
     assert "switch.a" in ctrl._shed
+
+
+# --- notification targets ---------------------------------------------------
+
+notify_helpers = importlib.import_module(f"{PKG}.notify_helpers")
+
+
+def test_notify_targets_from_new_list_field() -> None:
+    cfg = {const.CONF_NOTIFY: ["notify.mobile_app_a", "mobile_app_b", "", "notify.mobile_app_a"]}
+    assert notify_helpers.notify_targets(cfg) == [
+        "notify.mobile_app_a",
+        "notify.mobile_app_b",
+    ]
+
+
+def test_notify_targets_falls_back_to_legacy_fields() -> None:
+    cfg = {const.CONF_NOTIFY_1: "notify.mobile_app_a", const.CONF_NOTIFY_2: ""}
+    assert notify_helpers.notify_targets(cfg) == ["notify.mobile_app_a"]
+
+
+def test_cleared_list_wins_over_legacy_fields() -> None:
+    cfg = {const.CONF_NOTIFY: [], const.CONF_NOTIFY_1: "notify.mobile_app_a"}
+    assert notify_helpers.notify_targets(cfg) == []
+
+
+def test_notify_options_put_mobile_apps_first_and_hide_send_message() -> None:
+    options = notify_helpers.build_notify_options(
+        ["persistent_notification", "send_message", "mobile_app_phone", "alexa"],
+        [],
+    )
+    assert [value for value, _ in options] == [
+        "notify.mobile_app_phone",
+        "notify.alexa",
+        "notify.persistent_notification",
+    ]
+
+
+def test_notify_options_keep_missing_selected_target() -> None:
+    options = notify_helpers.build_notify_options(
+        ["mobile_app_phone"], ["notify.mobile_app_old"]
+    )
+    assert ("notify.mobile_app_old", "notify.mobile_app_old (unavailable)") in options
+
+
+def test_coordinator_uses_notify_targets() -> None:
+    hass = FakeHass()
+    hass.states.set("sensor.p", "0")
+    hass.states.set("sensor.t", "1")
+    coord = coordinator_mod.NamudriCoordinator(
+        hass,
+        "entry",
+        {
+            const.CONF_POWER_SENSOR: "sensor.p",
+            const.CONF_TARIFF_SENSOR: "sensor.t",
+            const.CONF_NOTIFY: ["notify.mobile_app_a", "notify.mobile_app_b"],
+        },
+    )
+    assert coord.controller.notify_services == [
+        "notify.mobile_app_a",
+        "notify.mobile_app_b",
+    ]
