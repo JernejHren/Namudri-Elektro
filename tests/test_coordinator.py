@@ -6,7 +6,7 @@ import asyncio
 import importlib
 import sys
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -101,9 +101,21 @@ class FakeStates:
     def __init__(self) -> None:
         self._data: dict[str, SimpleNamespace] = {}
 
-    def set(self, entity_id: str, state: str, attributes: dict | None = None) -> None:
+    def set(
+        self,
+        entity_id: str,
+        state: str,
+        attributes: dict | None = None,
+        age_seconds: float | None = None,
+    ) -> None:
+        """Set a state; ``age_seconds`` fakes how long ago it was last reported."""
+        reported = (
+            _clock["now"] - timedelta(seconds=age_seconds)
+            if age_seconds is not None
+            else None
+        )
         self._data[entity_id] = SimpleNamespace(
-            state=state, attributes=attributes or {}
+            state=state, attributes=attributes or {}, last_reported=reported
         )
 
     def get(self, entity_id: str):
@@ -115,13 +127,18 @@ class FakeServices:
         self._states = states
         self.calls: list[tuple[str, str, str | None]] = []
         self.payloads: list[dict] = []
+        self.lag_entities: set[str] = set()  # accept turn_off but report it late
+        self.fail_entities: set[str] = set()  # turn_off raises
 
     async def async_call(self, domain, service, data, blocking=False) -> None:
         entity_id = data.get("entity_id")
         self.calls.append((domain, service, entity_id))
         self.payloads.append(dict(data))
+        if service == "turn_off" and entity_id in self.fail_entities:
+            raise RuntimeError("device unreachable")
         if service == "turn_off":
-            self._states.set(entity_id, "off")
+            if entity_id not in self.lag_entities:
+                self._states.set(entity_id, "off")
         elif service == "turn_on":
             self._states.set(entity_id, "on")
 
@@ -285,6 +302,8 @@ def _snap(**overrides):
         agreed_power_w=7000.0,
         elapsed_seconds=300.0,
         window_complete=True,
+        power_valid=True,
+        current_power=12000.0,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -414,7 +433,7 @@ def test_dropped_records_are_persisted() -> None:
     _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(20))
 
     assert ctrl._shed == {}
-    assert ctrl._store.saved == {"shed": {}}
+    assert ctrl._store.saved == {"shed": {}, "device_power": {}}
 
 
 def test_shed_list_survives_restart() -> None:
@@ -566,3 +585,231 @@ def test_coordinator_uses_notify_targets() -> None:
         "notify.mobile_app_a",
         "notify.mobile_app_b",
     ]
+
+
+# --- stale power sensor and smoothing (coordinator) -------------------------
+
+
+def test_stale_or_unavailable_power_sensor_is_invalid() -> None:
+    coord, hass = make_coordinator(power="5000")
+    assert coord._compute().power_valid is True  # no timestamp -> nothing to check
+
+    hass.states.set("sensor.p", "5000", age_seconds=10)
+    assert coord._compute().power_valid is True
+
+    hass.states.set("sensor.p", "5000", age_seconds=300)  # timeout default 120 s
+    assert coord._compute().power_valid is False
+
+    hass.states.set("sensor.p", "unavailable")
+    assert coord._compute().power_valid is False
+
+    coord.power_timeout_seconds = 0  # check disabled
+    hass.states.set("sensor.p", "5000", age_seconds=3000)
+    assert coord._compute().power_valid is True
+
+
+def test_projection_uses_smoothed_power() -> None:
+    coord, hass = make_coordinator(power="1000")
+    coord.smoothing_seconds = 30
+    advance(coord, hass, at(1, 0), power="5000")
+    advance(coord, hass, at(1, 10))
+    snap = coord._compute()
+
+    energy = 1000 * 60 + 5000 * 10
+    smoothed = (20 * 1000 + 10 * 5000) / 30  # 20 s at 1 kW, 10 s at 5 kW
+    assert snap.current_power == 5000  # raw power stays visible
+    assert snap.projected_average == pytest.approx(
+        (energy + smoothed * 830) / 900, abs=0.05
+    )
+
+    coord.smoothing_seconds = 0
+    snap = coord._compute()
+    assert snap.projected_average == pytest.approx(
+        (energy + 5000 * 830) / 900, abs=0.05
+    )
+
+
+# --- controller: safety, learning, timing ----------------------------------
+
+
+def _offs(hass) -> list[str]:
+    return [c[2] for c in hass.services.calls if c[1] == "turn_off"]
+
+
+def test_unconfirmed_turn_off_is_still_recorded(monkeypatch) -> None:
+    """A slow device is recorded and the next one is NOT shed as well."""
+    monkeypatch.setattr(controller_mod, "STATE_CONFIRM_TIMEOUT_SECONDS", 0.6)
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "on")
+    hass.services.lag_entities.add("switch.a")
+    ctrl = _controller(hass, devices=("switch.a", "switch.b"))
+
+    _run(ctrl, _snap(), at(5))
+
+    assert "switch.a" in ctrl._shed
+    assert _offs(hass) == ["switch.a"]
+
+
+def test_failed_turn_off_moves_on_to_the_next_device() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "on")
+    hass.services.fail_entities.add("switch.a")
+    ctrl = _controller(hass, devices=("switch.a", "switch.b"))
+
+    _run(ctrl, _snap(), at(5))
+
+    assert "switch.a" not in ctrl._shed
+    assert "switch.b" in ctrl._shed
+
+
+def test_freshly_shed_device_reporting_on_is_not_a_user_override() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")  # state lags behind the turn_off
+    ctrl = _controller(hass, {"switch.a": _record("2026-10-13T20:00:00+02:00")})
+    outside = _snap(tariff_block=3, projected_average=0.0)
+
+    _run(ctrl, outside, at(0, 10))  # 10 s after the shed
+    assert "switch.a" in ctrl._shed
+
+    _run(ctrl, outside, at(1, 0))  # still on a minute later -> user override
+    assert "switch.a" not in ctrl._shed
+
+
+def test_invalid_power_pauses_shedding_and_notifies_once() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    coord = SimpleNamespace(async_request_refresh_ui=lambda: None, current_power=0.0)
+    ctrl = controller_mod.LoadShedController(
+        hass, coord, "entry", ["switch.a"], ["notify.mobile_app_x"]
+    )
+    bad = _snap(power_valid=False)
+
+    _run(ctrl, bad, at(5))
+    _run(ctrl, bad, at(6, 10))  # more than 60 s without a usable sensor
+    _run(ctrl, bad, at(7))
+    notifications = [c for c in hass.services.calls if c[0] == "notify"]
+    assert len(notifications) == 1
+    assert _offs(hass) == []
+
+    _run(ctrl, _snap(projected_average=0.0), at(8))  # sensor is back
+    notifications = [c for c in hass.services.calls if c[0] == "notify"]
+    assert len(notifications) == 2
+
+
+def test_overdue_device_is_restored_whatever_the_projection() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": _record()})  # shed at 20:00
+    ctrl.max_off_minutes = 30
+    overloaded = _snap(projected_average=12000.0, power_valid=False)
+
+    _run(ctrl, overloaded, at(20))  # off 20 min, cap is 30
+    assert hass.services.calls == []
+
+    _run(ctrl, overloaded, at(31))
+    assert hass.services.calls == [("switch", "turn_on", "switch.a")]
+
+
+def test_max_off_zero_disables_the_cap() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": _record("2026-10-13T19:00:00+02:00")})
+    ctrl.max_off_minutes = 0
+
+    _run(ctrl, _snap(projected_average=12000.0), at(30))  # off for 90 min
+
+    assert hass.services.calls == []
+
+
+def test_device_power_is_learned_from_the_drop_of_total_power() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+
+    _run(ctrl, _snap(current_power=9500.0), at(0, 10))  # shed at 9.5 kW
+    assert ctrl._shed["switch.a"]["power_before"] == 9500.0
+
+    _run(ctrl, _snap(current_power=6500.0, projected_average=7000.0), at(0, 40))
+
+    assert ctrl._shed["switch.a"]["estimated_w"] == 3000.0
+    assert ctrl._device_power == {"switch.a": 3000.0}
+    assert ctrl._store.saved["device_power"] == {"switch.a": 3000.0}
+
+
+def test_restore_waits_until_the_learned_power_fits() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": {**_record(), "estimated_w": 3000.0}})
+
+    # limit 7000, hysteresis 500: room is 1500 W at 5000 W -> a 3 kW load does not fit
+    _run(ctrl, _snap(projected_average=5000.0), at(20))
+    assert hass.services.calls == []
+
+    _run(ctrl, _snap(projected_average=3000.0), at(21))  # room 3500 W
+    assert hass.services.calls == [("switch", "turn_on", "switch.a")]
+
+
+def test_restore_uses_remembered_power_when_this_shed_was_not_measured() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": _record()})
+    ctrl._device_power["switch.a"] = 3000.0
+
+    _run(ctrl, _snap(projected_average=5000.0), at(20))
+
+    assert hass.services.calls == []
+
+
+def test_learned_power_survives_restart() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass)
+    ctrl._device_power = {"switch.a": 1200.0}
+    asyncio.run(ctrl.async_save())
+    saved = ctrl._store.saved
+
+    ctrl2 = _controller(hass)
+
+    async def _load():
+        return saved
+
+    ctrl2._store.async_load = _load
+    asyncio.run(ctrl2.async_load())
+    assert ctrl2._device_power == {"switch.a": 1200.0}
+
+
+def test_no_shedding_before_the_stabilization_time() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+    assert ctrl.stabilization_seconds == 300.0  # default: first 5 minutes
+
+    _run(ctrl, _snap(elapsed_seconds=120.0), at(2))
+    assert hass.services.calls == []
+
+    ctrl.stabilization_seconds = 60.0  # user lowers it
+    _run(ctrl, _snap(elapsed_seconds=120.0), at(2, 5))
+    assert _offs(hass) == ["switch.a"]
+
+
+def test_shed_cooldown_covers_the_smoothing_window() -> None:
+    """The smoothed projection needs time to show a shed, so wait for it."""
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "on")
+    coord = SimpleNamespace(
+        async_request_refresh_ui=lambda: None,
+        current_power=0.0,
+        smoothing_seconds=30.0,
+    )
+    ctrl = controller_mod.LoadShedController(
+        hass, coord, "entry", ["switch.a", "switch.b"], []
+    )
+
+    _run(ctrl, _snap(), at(5))
+    _run(ctrl, _snap(), at(5, 20))  # still within smoothing + 5 s
+    assert _offs(hass) == ["switch.a"]
+
+    _run(ctrl, _snap(), at(5, 40))
+    assert _offs(hass) == ["switch.a", "switch.b"]

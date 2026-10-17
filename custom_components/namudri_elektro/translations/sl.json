@@ -69,7 +69,10 @@
       "shed_threshold": { "name": "Prag za izklop" },
       "shed_hysteresis": { "name": "Histereza za vklop" },
       "min_off_minutes": { "name": "Minimalni čas izklopa" },
-      "stabilization_seconds": { "name": "Stabilizacija projekcije" }
+      "stabilization_seconds": { "name": "Stabilizacija projekcije" },
+      "max_off_minutes": { "name": "Največji čas izklopa" },
+      "power_smoothing": { "name": "Glajenje moči" },
+      "sensor_timeout": { "name": "Časovna omejitev senzorja" }
     }
   }
 }

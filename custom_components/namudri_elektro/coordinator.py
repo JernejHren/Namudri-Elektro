@@ -20,6 +20,8 @@ from .const import (
     CONF_POWER_SENSOR,
     CONF_TARIFF_SENSOR,
     DEFAULT_AGREED_KW,
+    DEFAULT_SENSOR_TIMEOUT_SECONDS,
+    DEFAULT_SMOOTHING_SECONDS,
     DOMAIN,
     UPDATE_INTERVAL_SECONDS,
     WINDOW_SECONDS,
@@ -57,6 +59,8 @@ class WindowSnapshot:
     # False when the window began mid-way (restart/reload): energy before the
     # start was backfilled with the current power, so shedding must not trust it.
     window_complete: bool = True
+    # False while the power sensor is unavailable or its state is stale
+    power_valid: bool = True
 
 
 class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
@@ -92,6 +96,9 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         # Shed evaluation stays off until number/switch entities restored their
         # values (see async_mark_ready), so defaults never trigger an action.
         self._ready: bool = False
+        # Live tuning (number entities)
+        self.power_timeout_seconds: float = DEFAULT_SENSOR_TIMEOUT_SECONDS
+        self.smoothing_seconds: float = DEFAULT_SMOOTHING_SECONDS
 
         devices = list(config.get(CONF_DEVICES) or [])
         notify = notify_targets(config)
@@ -116,7 +123,10 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         threshold_w: float | None = None,
         hysteresis_w: float | None = None,
         min_off_minutes: float | None = None,
+        max_off_minutes: float | None = None,
         stabilization_seconds: float | None = None,
+        smoothing_seconds: float | None = None,
+        power_timeout_seconds: float | None = None,
     ) -> None:
         """Update live shed tuning parameters."""
         ctrl = self.controller
@@ -126,9 +136,20 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             ctrl.hysteresis_w = max(0.0, float(hysteresis_w))
         if min_off_minutes is not None:
             ctrl.min_off_minutes = max(0.0, float(min_off_minutes))
+        if max_off_minutes is not None:
+            ctrl.max_off_minutes = max(0.0, float(max_off_minutes))
         if stabilization_seconds is not None:
             ctrl.stabilization_seconds = max(0.0, float(stabilization_seconds))
+        if smoothing_seconds is not None:
+            self.smoothing_seconds = max(0.0, float(smoothing_seconds))
+        if power_timeout_seconds is not None:
+            self.power_timeout_seconds = max(0.0, float(power_timeout_seconds))
         self._publish()
+
+    @property
+    def current_power(self) -> float:
+        """Latest import power in W (not smoothed)."""
+        return self._last_power
 
     @callback
     def async_request_refresh_ui(self) -> None:
@@ -190,17 +211,31 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         if self._ready:
             self.hass.async_create_task(self.controller.async_evaluate(snapshot))
 
-    def _read_power(self) -> float | None:
-        """Read current import power in W (export clamped to 0)."""
+    def _read_power(self, *, warn: bool = True) -> float | None:
+        """Read current import power in W (export clamped to 0).
+
+        Returns None when the sensor is unavailable, not numeric, or its state
+        has not been refreshed for longer than the sensor timeout.
+        """
         state = self.hass.states.get(self.power_sensor)
         if state is None or state.state in ("unknown", "unavailable", None, ""):
+            return None
+        stamp = getattr(state, "last_reported", None) or getattr(
+            state, "last_updated", None
+        )
+        if (
+            self.power_timeout_seconds > 0
+            and stamp is not None
+            and _seconds_between(stamp, dt_util.now()) > self.power_timeout_seconds
+        ):
             return None
         try:
             return max(0.0, float(state.state))
         except (TypeError, ValueError):
-            _LOGGER.warning(
-                "Invalid power state from %s: %s", self.power_sensor, state.state
-            )
+            if warn:
+                _LOGGER.warning(
+                    "Invalid power state from %s: %s", self.power_sensor, state.state
+                )
             return None
 
     def _read_tariff(self) -> int:
@@ -283,6 +318,32 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         if len(self._samples) > 2000:
             self._samples = self._samples[-1000:]
 
+    def _projection_power(self, now: datetime) -> float:
+        """Power assumed for the rest of the window.
+
+        The average over the last ``smoothing_seconds`` (limited to the current
+        window), so a short spike does not get extrapolated over minutes.
+        With smoothing 0 it is the latest power.
+        """
+        span = self.smoothing_seconds
+        if span <= 0 or not self._samples:
+            return self._last_power
+        end = now.timestamp()
+        start = max(end - span, self._samples[0][0].timestamp())
+        if end - start <= 0:
+            return self._last_power
+        total = 0.0
+        newer = end
+        # Each sample is the power in force from its time on (step function)
+        for sample_time, sample_power in reversed(self._samples):
+            begin = max(sample_time.timestamp(), start)
+            if newer > begin:
+                total += sample_power * (newer - begin)
+            newer = begin
+            if sample_time.timestamp() <= start:
+                break
+        return total / (end - start)
+
     def _compute(self) -> WindowSnapshot:
         """Compute running average, projection, headroom."""
         now = dt_util.now()
@@ -302,7 +363,7 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
                 energy_ws += self._last_power * dt
 
         running_average, projected_average = project_average(
-            energy_ws, self._last_power, elapsed
+            energy_ws, self._projection_power(now), elapsed
         )
 
         tariff = self._read_tariff()
@@ -327,4 +388,5 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             shedding_active=self.controller.shedding_active,
             shed_devices=self.controller.shed_entity_ids,
             window_complete=self._window_complete,
+            power_valid=self._read_power(warn=False) is not None,
         )

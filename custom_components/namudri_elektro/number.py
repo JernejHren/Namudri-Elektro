@@ -20,7 +20,10 @@ from .const import (
     CONF_NAME,
     DEFAULT_AGREED_KW,
     DEFAULT_HYSTERESIS_W,
+    DEFAULT_MAX_OFF_MINUTES,
     DEFAULT_MIN_OFF_MINUTES,
+    DEFAULT_SENSOR_TIMEOUT_SECONDS,
+    DEFAULT_SMOOTHING_SECONDS,
     DEFAULT_STABILIZATION_SECONDS,
     DEFAULT_THRESHOLD_W,
     DOMAIN,
@@ -59,6 +62,18 @@ def _apply_min_off(coord: NamudriCoordinator, value: float) -> None:
 
 def _apply_stabilization(coord: NamudriCoordinator, value: float) -> None:
     coord.update_shed_settings(stabilization_seconds=value)
+
+
+def _apply_max_off(coord: NamudriCoordinator, value: float) -> None:
+    coord.update_shed_settings(max_off_minutes=value)
+
+
+def _apply_smoothing(coord: NamudriCoordinator, value: float) -> None:
+    coord.update_shed_settings(smoothing_seconds=value)
+
+
+def _apply_sensor_timeout(coord: NamudriCoordinator, value: float) -> None:
+    coord.update_shed_settings(power_timeout_seconds=value)
 
 
 SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
@@ -109,6 +124,42 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
         unit=UnitOfTime.SECONDS,
         device_class=None,
         apply=_apply_stabilization,
+    ),
+    ShedNumberSpec(
+        key="max_off_minutes",
+        translation_key="max_off_minutes",
+        name="Maximum off time",
+        default=DEFAULT_MAX_OFF_MINUTES,
+        min_value=0.0,
+        max_value=1440.0,
+        step=5.0,
+        unit=UnitOfTime.MINUTES,
+        device_class=None,
+        apply=_apply_max_off,
+    ),
+    ShedNumberSpec(
+        key="power_smoothing_seconds",
+        translation_key="power_smoothing",
+        name="Power smoothing",
+        default=DEFAULT_SMOOTHING_SECONDS,
+        min_value=0.0,
+        max_value=300.0,
+        step=5.0,
+        unit=UnitOfTime.SECONDS,
+        device_class=None,
+        apply=_apply_smoothing,
+    ),
+    ShedNumberSpec(
+        key="sensor_timeout_seconds",
+        translation_key="sensor_timeout",
+        name="Sensor timeout",
+        default=DEFAULT_SENSOR_TIMEOUT_SECONDS,
+        min_value=0.0,
+        max_value=3600.0,
+        step=10.0,
+        unit=UnitOfTime.SECONDS,
+        device_class=None,
+        apply=_apply_sensor_timeout,
     ),
 )
 
@@ -219,7 +270,11 @@ class ShedTuningNumber(RestoreNumber):
         last = await self.async_get_last_number_data()
         if last is not None and last.native_value is not None:
             self._attr_native_value = float(last.native_value)
-        self._spec.apply(self._coordinator, self._attr_native_value or self._spec.default)
+        value = self._attr_native_value
+        # 0 is a valid value (e.g. "disabled"), so do not fall back on falsy
+        self._spec.apply(
+            self._coordinator, self._spec.default if value is None else value
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Update tuning value."""

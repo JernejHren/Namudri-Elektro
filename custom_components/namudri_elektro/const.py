@@ -36,7 +36,30 @@ DEFAULT_AGREED_KW = {
 DEFAULT_THRESHOLD_W = 500.0
 DEFAULT_HYSTERESIS_W = 500.0
 DEFAULT_MIN_OFF_MINUTES = 15.0
-DEFAULT_STABILIZATION_SECONDS = 60.0
+# No shedding during the first N seconds of a window: early on the projection
+# extrapolates a few seconds of consumption over most of the window.
+DEFAULT_STABILIZATION_SECONDS = 300.0
+# Safety cap: a shed device is restored after this long whatever the projection
+# (0 = no cap).
+DEFAULT_MAX_OFF_MINUTES = 120.0
+# The power assumed for the rest of the window is averaged over this many
+# seconds (0 = use the instantaneous power).
+DEFAULT_SMOOTHING_SECONDS = 30.0
+# Power sensor state older than this is treated as unavailable (0 = no check).
+DEFAULT_SENSOR_TIMEOUT_SECONDS = 120.0
+
+# After turn_off, wait this long for the entity to report "off" (slow cloud devices)
+STATE_CONFIRM_TIMEOUT_SECONDS = 10.0
+STATE_CONFIRM_INTERVAL_SECONDS = 0.5
+# A freshly shed device that still reports "on" is not taken for a user override
+# during this grace period (its state may simply lag)
+SHED_RECORD_GRACE_SECONDS = 30
+# The power of a shed device is learned from the drop of the total power,
+# measured this long after the shed (and not later than the max age)
+LEARN_DELAY_SECONDS = 15
+LEARN_MAX_AGE_SECONDS = 120
+# Notify when the power sensor has been unusable for this long
+POWER_ALERT_AFTER_SECONDS = 60
 
 ATTR_WINDOW_START = "window_start"
 ATTR_ELAPSED_SECONDS = "elapsed_seconds"
