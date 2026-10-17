@@ -42,6 +42,8 @@ Billing windows are fixed at **:00, :15, :30, :45** (900 s).
 3. **Projected average** = (energy so far + current power × remaining time) / 900 s.
 4. **Headroom** = agreed power of the current block − projected average.
 
+The power assumed for the rest of the window is the average of the last 30 s (**Power smoothing**, 0 = latest value), so a short spike is not extrapolated over minutes.
+
 If Home Assistant starts or reloads in the middle of a window, the energy before that moment is unknown and is estimated with the current power. Such a window is flagged `window_complete: false` (attribute of the projected power sensor) and the controller waits for the next window before acting.
 
 ```mermaid
@@ -52,26 +54,29 @@ flowchart TD
     D -- no --> Z["Do nothing, keep current state"]
     D -- yes --> E{"Block 1 or 2?"}
     E -- no --> R1["Restore auto-shed devices<br/>one at a time, 30 s apart"]
-    E -- yes --> L{"Agreed power set, devices<br/>configured, window complete?"}
+    E -- yes --> L{"Agreed power set, devices<br/>configured, window complete,<br/>power sensor valid?"}
     L -- no --> Z
     L -- yes --> F{"Stabilization passed and<br/>projected > limit + threshold?"}
     F -- yes --> S["Shed the first device that is on<br/>in priority order"]
     F -- no --> G{"Projected < limit − hysteresis<br/>and min off time elapsed?"}
-    G -- yes --> R2["Restore the last shed device"]
+    G -- yes --> R2["Restore the last shed device<br/>that fits (learned power)"]
     G -- no --> Z
 ```
 
 ## Load shedding (blocks 1–2)
 
-When the projection is above agreed power + threshold (after the stabilization delay):
+When the projection is above agreed power + threshold, and at least **Projection stabilization** seconds of the window have passed (default 300 s = 5 min; early in a window the projection is too noisy):
 
 1. Turn off the next device that is **on**, in priority order (first priority first).
-2. Remember its previous state (climate HVAC mode / setpoint, water heater operation mode).
+2. Remember its previous state (climate HVAC mode / setpoint, water heater operation mode) and measure how much the total power dropped — this is the device's power, remembered for the restore decision.
 3. Only restore devices **this integration** turned off.
 4. Manual offs stay off; if you turn a shed device back on, it leaves the auto-shed list.
-5. Restore when the projection is below agreed power − hysteresis and the minimum off time (default 15 min) has elapsed — **one device at a time**, 30 s apart.
+5. Restore when the projection is below agreed power − hysteresis, the minimum off time (default 15 min) has elapsed **and the device's learned power still fits** below that line — one device at a time, 30 s apart.
 6. Outside blocks 1–2, auto-shed devices are restored (also one by one).
 7. If the tariff sensor is unavailable, nothing is shed or restored until it is back.
+8. If the power sensor is unavailable or its state is older than **Sensor timeout** (default 120 s), nothing is shed until it is back; you get a notification after a minute.
+9. A device never stays off longer than **Maximum off time** (default 120 min, 0 = no cap): it is restored whatever the projection, tariff or sensor state is. Use it as a safety net for heating and hot water.
+10. Slow devices (e.g. cloud climate) get up to 10 s to report `off`; once `turn_off` was accepted the device is recorded as shed, so it is always restored later.
 
 Supported device domains: `switch`, `climate`, `water_heater`. The master switch **Load shedding** disables the controller and restores everything. The shed list is persisted and survives restarts.
 
@@ -94,8 +99,11 @@ Entity IDs below assume the default device name *Namudri Elektro* (e.g. `sensor.
 | `number.*_agreed_power_t1` … `t5` | Dogovorjena moč (**kW**) |
 | `number.*_shed_threshold` | W above the limit before shedding |
 | `number.*_restore_hysteresis` | W below the limit before restoring |
-| `number.*_minimum_off_time` | Minutes a shed device stays off |
-| `number.*_projection_stabilization` | Seconds into the window before shedding |
+| `number.*_minimum_off_time` | Minutes a shed device stays off at least |
+| `number.*_maximum_off_time` | Minutes after which a shed device is restored whatever happens (0 = no cap) |
+| `number.*_projection_stabilization` | No shedding during the first N seconds of a window (default 300) |
+| `number.*_power_smoothing` | Seconds over which the power for the projection is averaged (0 = off) |
+| `number.*_sensor_timeout` | Seconds after which a power sensor state counts as stale (0 = no check) |
 
 ## Lovelace
 

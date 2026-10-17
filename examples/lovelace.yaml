@@ -58,3 +58,6 @@ cards:
       - entity: number.namudri_elektro_restore_hysteresis
       - entity: number.namudri_elektro_minimum_off_time
       - entity: number.namudri_elektro_projection_stabilization
+      - entity: number.namudri_elektro_maximum_off_time
+      - entity: number.namudri_elektro_power_smoothing
+      - entity: number.namudri_elektro_sensor_timeout

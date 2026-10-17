@@ -69,7 +69,10 @@
       "shed_threshold": { "name": "Shed threshold" },
       "shed_hysteresis": { "name": "Restore hysteresis" },
       "min_off_minutes": { "name": "Minimum off time" },
-      "stabilization_seconds": { "name": "Projection stabilization" }
+      "stabilization_seconds": { "name": "Projection stabilization" },
+      "max_off_minutes": { "name": "Maximum off time" },
+      "power_smoothing": { "name": "Power smoothing" },
+      "sensor_timeout": { "name": "Sensor timeout" }
     }
   }
 }
