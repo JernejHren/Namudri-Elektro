@@ -15,6 +15,11 @@ CONF_NOTIFY_2 = "notify_2"
 WINDOW_SECONDS = 900  # Slovenian network billing: 15-minute windows
 UPDATE_INTERVAL_SECONDS = 5
 SHED_ACTION_COOLDOWN_SECONDS = 8
+# Restore one device at a time with this pause, so loads do not return in a burst
+RESTORE_STAGGER_SECONDS = 30
+# After an auto-restore the same device may not be shed again for this long
+# (anti-flapping; matches the length of one billing window)
+RESTORE_GUARD_MINUTES = 15
 
 # Load shedding only in expensive blocks
 SHED_TARIFF_BLOCKS = frozenset({1, 2})

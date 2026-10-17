@@ -101,8 +101,10 @@ class FakeStates:
     def __init__(self) -> None:
         self._data: dict[str, SimpleNamespace] = {}
 
-    def set(self, entity_id: str, state: str) -> None:
-        self._data[entity_id] = SimpleNamespace(state=state, attributes={})
+    def set(self, entity_id: str, state: str, attributes: dict | None = None) -> None:
+        self._data[entity_id] = SimpleNamespace(
+            state=state, attributes=attributes or {}
+        )
 
     def get(self, entity_id: str):
         return self._data.get(entity_id)
@@ -112,10 +114,12 @@ class FakeServices:
     def __init__(self, states: FakeStates) -> None:
         self._states = states
         self.calls: list[tuple[str, str, str | None]] = []
+        self.payloads: list[dict] = []
 
     async def async_call(self, domain, service, data, blocking=False) -> None:
         entity_id = data.get("entity_id")
         self.calls.append((domain, service, entity_id))
+        self.payloads.append(dict(data))
         if service == "turn_off":
             self._states.set(entity_id, "off")
         elif service == "turn_on":
@@ -256,9 +260,9 @@ def test_evaluation_waits_until_ready() -> None:
 # --- controller ------------------------------------------------------------
 
 
-def _controller(hass, shed: dict | None = None):
+def _controller(hass, shed: dict | None = None, devices=("switch.a",)):
     coord = SimpleNamespace(async_request_refresh_ui=lambda: None)
-    ctrl = controller_mod.LoadShedController(hass, coord, "entry", ["switch.a"], [])
+    ctrl = controller_mod.LoadShedController(hass, coord, "entry", list(devices), [])
     ctrl._shed = shed or {}
     return ctrl
 
@@ -319,3 +323,171 @@ def test_sheds_in_complete_window() -> None:
 
     assert ("switch", "turn_off", "switch.a") in hass.services.calls
     assert "switch.a" in ctrl._shed
+
+
+# --- controller: priority, timing, guard, persistence ---------------------
+
+
+def _run(ctrl, snap, now: datetime) -> None:
+    _clock["now"] = now
+    asyncio.run(ctrl.async_evaluate(snap))
+
+
+def _record(off_since: str = "2026-10-13T20:00:00+02:00") -> dict:
+    return {"off_since": off_since, "previous": {}}
+
+
+def test_sheds_in_priority_order() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "on")
+    ctrl = _controller(hass, devices=("switch.a", "switch.b"))
+
+    _run(ctrl, _snap(), at(5))
+    _run(ctrl, _snap(), at(5, 20))  # past the short shed cooldown
+
+    offs = [c for c in hass.services.calls if c[1] == "turn_off"]
+    assert offs == [("switch", "turn_off", "switch.a"), ("switch", "turn_off", "switch.b")]
+
+
+def test_restore_waits_for_min_off_time() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": _record()})
+
+    _run(ctrl, _snap(projected_average=0.0), at(5))  # off only 5 min (< 15)
+    assert hass.services.calls == []
+
+    _run(ctrl, _snap(projected_average=0.0), at(20))  # 20 min
+    assert hass.services.calls == [("switch", "turn_on", "switch.a")]
+
+
+def test_restore_needs_projection_below_limit_minus_hysteresis() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": _record()})
+
+    # limit 7000, hysteresis 500 -> must be below 6500; 6800 is not enough
+    _run(ctrl, _snap(projected_average=6800.0), at(20))
+    assert hass.services.calls == []
+
+    _run(ctrl, _snap(projected_average=6000.0), at(21))
+    assert hass.services.calls == [("switch", "turn_on", "switch.a")]
+
+
+def test_restores_one_device_at_a_time_last_shed_first() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    hass.states.set("switch.b", "off")
+    ctrl = _controller(
+        hass,
+        {"switch.a": _record(), "switch.b": _record()},
+        devices=("switch.a", "switch.b"),
+    )
+    outside = _snap(tariff_block=3, projected_average=0.0)
+
+    _run(ctrl, outside, at(20))
+    assert hass.services.calls == [("switch", "turn_on", "switch.b")]
+
+    _run(ctrl, outside, at(20, 10))  # inside the 30 s stagger -> nothing
+    assert len(hass.services.calls) == 1
+
+    _run(ctrl, outside, at(20, 40))
+    assert hass.services.calls[-1] == ("switch", "turn_on", "switch.a")
+
+
+def test_restored_device_is_guarded_for_15_minutes() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "off")
+    ctrl = _controller(hass, {"switch.a": _record()})
+
+    _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(20))  # restored
+    assert hass.services.calls == [("switch", "turn_on", "switch.a")]
+
+    _run(ctrl, _snap(), at(25))  # overload again, but guard is active
+    assert [c for c in hass.services.calls if c[1] == "turn_off"] == []
+
+    _run(ctrl, _snap(), at(36))  # 16 min after restore
+    assert ("switch", "turn_off", "switch.a") in hass.services.calls
+
+
+def test_guard_falls_through_to_next_device() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "on")
+    ctrl = _controller(hass, devices=("switch.a", "switch.b"))
+    _clock["now"] = at(5)
+    ctrl._restored_at["switch.a"] = at(0)  # restored 5 min ago
+
+    _run(ctrl, _snap(), at(5))
+
+    assert hass.services.calls == [("switch", "turn_off", "switch.b")]
+
+
+def test_dropped_records_are_persisted() -> None:
+    hass = FakeHass()  # switch.a has no state -> record is dropped
+    ctrl = _controller(hass, {"switch.a": _record()})
+
+    _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(20))
+
+    assert ctrl._shed == {}
+    assert ctrl._store.saved == {"shed": {}}
+
+
+def test_shed_list_survives_restart() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+    _run(ctrl, _snap(), at(5))
+    saved = ctrl._store.saved
+    assert "switch.a" in saved["shed"]
+
+    ctrl2 = _controller(hass)
+
+    async def _load():
+        return saved
+
+    ctrl2._store.async_load = _load
+    asyncio.run(ctrl2.async_load())
+    assert "switch.a" in ctrl2._shed
+
+
+def test_force_shed_ignores_projection_and_guard() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+    _clock["now"] = at(5)
+    ctrl._restored_at["switch.a"] = at(4)
+
+    assert asyncio.run(ctrl.async_force_shed()) == "switch.a"
+    assert ("switch", "turn_off", "switch.a") in hass.services.calls
+    assert "switch.a" in ctrl._shed
+
+
+def test_force_shed_needs_shedding_enabled() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+    ctrl.enabled = False
+
+    assert asyncio.run(ctrl.async_force_shed()) is None
+    assert hass.services.calls == []
+
+
+def test_water_heater_operation_mode_is_restored() -> None:
+    hass = FakeHass()
+    hass.states.set("water_heater.tank", "eco", {"temperature": 55})
+    ctrl = _controller(hass, devices=("water_heater.tank",))
+
+    _run(ctrl, _snap(), at(5))  # shed
+    assert ctrl._shed["water_heater.tank"]["previous"]["operation_mode"] == "eco"
+
+    _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(25))  # restore
+    assert ("water_heater", "set_operation_mode", "water_heater.tank") in (
+        hass.services.calls
+    )
+    payload = next(
+        p for c, p in zip(hass.services.calls, hass.services.payloads)
+        if c[1] == "set_operation_mode"
+    )
+    assert payload["operation_mode"] == "eco"
