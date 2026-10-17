@@ -17,6 +17,7 @@ from .const import (
     DEFAULT_STABILIZATION_SECONDS,
     DEFAULT_THRESHOLD_W,
     DOMAIN,
+    RESTORE_STAGGER_SECONDS,
     SHED_ACTION_COOLDOWN_SECONDS,
     SHED_TARIFF_BLOCKS,
     STORAGE_KEY,
@@ -56,6 +57,7 @@ class LoadShedController:
         self._shed: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._last_action: datetime | None = None
+        self._action_cooldown: float = float(SHED_ACTION_COOLDOWN_SECONDS)
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
 
     @property
@@ -110,6 +112,23 @@ class LoadShedController:
             await self.async_restore_all(reason="disabled")
         self.coordinator.async_request_refresh_ui()
 
+    async def async_force_shed(self) -> str | None:
+        """Shed the next device in priority order now (ignores the projection)."""
+        if not self.enabled:
+            _LOGGER.warning("force_shed ignored: load shedding is disabled")
+            return None
+        async with self._lock:
+            shed = await self._shed_next()
+            if shed:
+                self._mark_action(SHED_ACTION_COOLDOWN_SECONDS)
+                await self.async_save()
+                await self._notify(
+                    "Namudri — IZKLOP",
+                    f"Ročni izklop (force_shed): {shed}",
+                )
+                self.coordinator.async_request_refresh_ui()
+            return shed
+
     async def async_evaluate(self, snapshot: WindowSnapshot) -> None:
         """Evaluate shed/restore against current projection."""
         if self._lock.locked():
@@ -130,13 +149,23 @@ class LoadShedController:
         projected = snapshot.projected_average
         limit = snapshot.agreed_power_w
 
+        # Unknown tariff block (sensor unavailable/invalid): do nothing and keep
+        # the current state — it could be an expensive block.
+        if tariff == 0:
+            return
+
         # Outside shed blocks: restore what we turned off
         if tariff not in SHED_TARIFF_BLOCKS:
             if self._shed:
-                await self._restore_ready(projected, limit, force_limit_ok=True)
+                await self._restore_step(tariff, projected, limit)
             return
 
         if limit <= 0 or not self.devices:
+            return
+
+        # Window started mid-way (restart/reload): the projection rests on
+        # backfilled energy, so neither shed nor restore until the next window.
+        if not snapshot.window_complete:
             return
 
         # Shed: projection above limit + threshold, after stabilization
@@ -146,7 +175,7 @@ class LoadShedController:
         ):
             shed = await self._shed_next()
             if shed:
-                self._last_action = dt_util.now()
+                self._mark_action(SHED_ACTION_COOLDOWN_SECONDS)
                 await self.async_save()
                 await self._notify(
                     "Namudri — IZKLOP",
@@ -159,24 +188,35 @@ class LoadShedController:
 
         # Restore: projection below limit − hysteresis
         if self._shed and projected < (limit - self.hysteresis_w):
-            restored = await self._restore_ready(projected, limit, force_limit_ok=False)
-            if restored:
-                self._last_action = dt_util.now()
-                await self.async_save()
-                await self._notify(
-                    "Namudri — VKLOP",
-                    f"Vklopljeno: {', '.join(restored)}\n"
-                    f"Projekcija: {projected:.0f} W < meja {limit:.0f} W "
-                    f"(blok {tariff})",
-                )
-                self.coordinator.async_request_refresh_ui()
+            await self._restore_step(tariff, projected, limit)
 
     def _in_cooldown(self) -> bool:
         if self._last_action is None:
             return False
         return (dt_util.now() - self._last_action) < timedelta(
-            seconds=SHED_ACTION_COOLDOWN_SECONDS
+            seconds=self._action_cooldown
         )
+
+    def _mark_action(self, cooldown_seconds: float) -> None:
+        """Remember an action and how long to pause before the next one."""
+        self._last_action = dt_util.now()
+        self._action_cooldown = float(cooldown_seconds)
+
+    async def _restore_step(
+        self, tariff: int, projected: float, limit: float
+    ) -> None:
+        """Restore at most one device, then pause so loads return gradually."""
+        restored = await self._restore_ready()
+        if not restored:
+            return
+        self._mark_action(RESTORE_STAGGER_SECONDS)
+        await self.async_save()
+        await self._notify(
+            "Namudri — VKLOP",
+            f"Vklopljeno: {', '.join(restored)}\n"
+            f"Projekcija: {projected:.0f} W (meja {limit:.0f} W, blok {tariff})",
+        )
+        self.coordinator.async_request_refresh_ui()
 
     async def _prune_user_overrides(self) -> None:
         """If user turned a shed device back on, drop it from our list."""
@@ -197,7 +237,7 @@ class LoadShedController:
             self.coordinator.async_request_refresh_ui()
 
     async def _shed_next(self) -> str | None:
-        """Turn off the next on device in priority order."""
+        """Turn off the next on device in priority order (first priority first)."""
         for entity_id in self.devices:
             if entity_id in self._shed:
                 continue
@@ -221,15 +261,14 @@ class LoadShedController:
             return entity_id
         return None
 
-    async def _restore_ready(
-        self,
-        projected: float,
-        limit: float,
-        *,
-        force_limit_ok: bool,
-    ) -> list[str]:
-        """Restore devices that meet min-off; one per cycle unless force all outside blocks."""
+    async def _restore_ready(self) -> list[str]:
+        """Restore at most one device that met its min-off time.
+
+        Callers save the shed list when something was restored; records that
+        were only dropped (device gone / switched on by the user) are saved here.
+        """
         restored: list[str] = []
+        pruned = False
         # Restore in reverse priority (last shed first)
         for entity_id in reversed(list(self._shed.keys())):
             rec = self._shed[entity_id]
@@ -238,10 +277,12 @@ class LoadShedController:
             state = self.hass.states.get(entity_id)
             if state is None:
                 self._shed.pop(entity_id, None)
+                pruned = True
                 continue
             # Only restore if still off (user didn't change)
             if self._is_on(entity_id, state.state):
                 self._shed.pop(entity_id, None)
+                pruned = True
                 continue
 
             ok = await self._turn_on(entity_id, rec.get("previous") or {})
@@ -249,9 +290,9 @@ class LoadShedController:
                 self._shed.pop(entity_id, None)
                 restored.append(entity_id)
                 _LOGGER.info("Auto-restored %s", entity_id)
-                if not force_limit_ok:
-                    # One restore per cycle inside shed blocks
-                    break
+                break  # one device per step; the next one follows after a pause
+        if pruned and not restored:
+            await self.async_save()
         return restored
 
     async def async_restore_all(self, reason: str = "") -> None:
@@ -306,6 +347,9 @@ class LoadShedController:
             previous["hvac_mode"] = state.state
             if "temperature" in state.attributes:
                 previous["temperature"] = state.attributes.get("temperature")
+        elif domain == "water_heater":
+            # The state of a water heater is its operation mode (eco, performance…)
+            previous["operation_mode"] = state.state
         return previous
 
     async def _turn_off(self, entity_id: str) -> bool:
@@ -351,6 +395,33 @@ class LoadShedController:
                 else:
                     await self.hass.services.async_call(
                         "climate",
+                        "turn_on",
+                        {"entity_id": entity_id},
+                        blocking=True,
+                    )
+            elif domain == "water_heater" and previous.get("operation_mode") not in (
+                None,
+                "off",
+                "unknown",
+                "unavailable",
+            ):
+                try:
+                    await self.hass.services.async_call(
+                        "water_heater",
+                        "set_operation_mode",
+                        {
+                            "entity_id": entity_id,
+                            "operation_mode": previous["operation_mode"],
+                        },
+                        blocking=True,
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "set_operation_mode failed for %s, falling back to turn_on",
+                        entity_id,
+                    )
+                    await self.hass.services.async_call(
+                        "water_heater",
                         "turn_on",
                         {"entity_id": entity_id},
                         blocking=True,

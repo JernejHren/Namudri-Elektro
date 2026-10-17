@@ -134,6 +134,7 @@ class AgreedPowerNumber(RestoreNumber):
     """Configurable dogovorjena moč for one tariff block."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
     _attr_mode = NumberMode.BOX
     _attr_device_class = NumberDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
@@ -182,6 +183,7 @@ class ShedTuningNumber(RestoreNumber):
     """Load-shedding tuning parameter."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
     _attr_mode = NumberMode.BOX
 
     def __init__(

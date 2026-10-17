@@ -28,6 +28,7 @@ class LoadSheddingSwitch(SwitchEntity, RestoreEntity):
     """Enable/disable automatic load shedding."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
     _attr_translation_key = "load_shedding"
     _attr_name = "Load shedding"
 
