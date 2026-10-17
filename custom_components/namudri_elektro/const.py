@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "namudri_elektro"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 CONF_POWER_SENSOR = "power_sensor"
 CONF_TARIFF_SENSOR = "tariff_sensor"
