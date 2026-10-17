@@ -12,11 +12,10 @@
       },
       "shedding": {
         "title": "Omejitev porabe",
-        "description": "Neobvezno. Vrstni red = prioriteta (prva se izklopi najprej). Deluje samo v blokih 1 in 2. Prazno = samo monitoring.",
+        "description": "Neobvezno. Vrstni red = prioriteta (prva se izklopi najprej). Deluje samo v blokih 1 in 2. Prazno = samo monitoring. Izberi mobilne aplikacije (ali druge notify storitve), ki naj dobijo obvestilo ob vsakem izklopu/vklopu.",
         "data": {
           "devices": "Naprave (po prioriteti)",
-          "notify_1": "Obvestilo 1 (npr. notify.mobile_app_telefon)",
-          "notify_2": "Obvestilo 2"
+          "notify_services": "Obvestila (izberi telefone)"
         }
       }
     },
@@ -39,8 +38,7 @@
         "description": "Vrstni red = prioriteta. Izklop samo v blokih 1 in 2.",
         "data": {
           "devices": "Naprave (po prioriteti)",
-          "notify_1": "Obvestilo 1",
-          "notify_2": "Obvestilo 2"
+          "notify_services": "Obvestila (izberi telefone)"
         }
       }
     }

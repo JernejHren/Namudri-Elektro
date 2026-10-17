@@ -12,11 +12,10 @@
       },
       "shedding": {
         "title": "Load shedding",
-        "description": "Optional. Priority order = list order (first shed first). Only active in tariff blocks 1 and 2. Leave empty for monitoring only.",
+        "description": "Optional. Priority order = list order (first shed first). Only active in tariff blocks 1 and 2. Leave empty for monitoring only. Pick the mobile apps (or other notify services) that should be notified on every shed/restore.",
         "data": {
           "devices": "Devices (priority order)",
-          "notify_1": "Notify service 1 (e.g. notify.mobile_app_phone)",
-          "notify_2": "Notify service 2"
+          "notify_services": "Notifications (pick your phones)"
         }
       }
     },
@@ -39,8 +38,7 @@
         "description": "Priority order = list order. Shedding runs only in blocks 1 and 2.",
         "data": {
           "devices": "Devices (priority order)",
-          "notify_1": "Notify service 1",
-          "notify_2": "Notify service 2"
+          "notify_services": "Notifications (pick your phones)"
         }
       }
     }

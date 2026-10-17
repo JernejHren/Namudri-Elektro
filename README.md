@@ -29,7 +29,7 @@ Copy `custom_components/namudri_elektro` into your Home Assistant `custom_compon
 
 1. **Settings → Devices & services → Add integration → Namudri Elektro.**
 2. Pick the power sensor and the tariff block sensor.
-3. Optionally pick the devices to shed, in priority order (first = shed first), and up to two notify services (e.g. `notify.mobile_app_phone`). Leave empty for monitoring only. This can be changed later via **Configure**.
+3. Optionally pick the devices to shed, in priority order (first = shed first), and the phones to notify on every shed/restore. Notification targets are chosen from a list of the notify services registered in your Home Assistant (mobile apps first, e.g. `notify.mobile_app_phone`). Leave empty for monitoring only. This can be changed later via **Configure**.
 4. Set the agreed power **T1–T5 in kW**. The default is **0 = not set**: until you set a block, its headroom and over-limit are unknown and nothing is shed in that block.
 5. Adjust the shed tuning numbers if needed and switch **Load shedding** on.
 

@@ -7,23 +7,29 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
 )
 
 from .const import (
     CONF_DEVICES,
     CONF_NAME,
+    CONF_NOTIFY,
     CONF_NOTIFY_1,
     CONF_NOTIFY_2,
     CONF_POWER_SENSOR,
     CONF_TARIFF_SENSOR,
     DOMAIN,
 )
+from .notify_helpers import build_notify_options, notify_targets
 
 
 def _sensor_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -54,9 +60,26 @@ def _sensor_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     return vol.Schema(schema)
 
 
-def _shedding_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
+def _notify_service_names(hass: HomeAssistant) -> list[str]:
+    """Names of the registered notify services (without the domain)."""
+    getter = getattr(hass.services, "async_services_for_domain", None)
+    if getter is not None:
+        return list(getter("notify"))
+    return list(hass.services.async_services().get("notify", {}))
+
+
+def _shedding_schema(
+    hass: HomeAssistant, defaults: dict[str, Any] | None = None
+) -> vol.Schema:
     defaults = defaults or {}
     devices = defaults.get(CONF_DEVICES) or []
+    selected = notify_targets(defaults)
+    options = [
+        SelectOptionDict(value=value, label=label)
+        for value, label in build_notify_options(
+            _notify_service_names(hass), selected
+        )
+    ]
     return vol.Schema(
         {
             vol.Optional(CONF_DEVICES, default=devices): EntitySelector(
@@ -65,22 +88,23 @@ def _shedding_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     multiple=True,
                 )
             ),
-            vol.Optional(
-                CONF_NOTIFY_1, default=defaults.get(CONF_NOTIFY_1) or ""
-            ): TextSelector(),
-            vol.Optional(
-                CONF_NOTIFY_2, default=defaults.get(CONF_NOTIFY_2) or ""
-            ): TextSelector(),
+            vol.Optional(CONF_NOTIFY, default=selected): SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
         }
     )
 
 
 def _normalize_shedding(data: dict[str, Any]) -> dict[str, Any]:
-    """Normalize devices/notify fields."""
+    """Normalize devices/notify fields and drop the legacy text fields."""
     out = dict(data)
+    out[CONF_NOTIFY] = notify_targets(out)
     for key in (CONF_NOTIFY_1, CONF_NOTIFY_2):
-        if not out.get(key):
-            out[key] = ""
+        out.pop(key, None)
     out[CONF_DEVICES] = list(out.get(CONF_DEVICES) or [])
     return out
 
@@ -121,7 +145,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="shedding",
-            data_schema=_shedding_schema(),
+            data_schema=_shedding_schema(self.hass),
         )
 
     @staticmethod
@@ -165,5 +189,5 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         defaults = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(
             step_id="shedding",
-            data_schema=_shedding_schema(defaults),
+            data_schema=_shedding_schema(self.hass, defaults),
         )
