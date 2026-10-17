@@ -130,6 +130,11 @@ class LoadShedController:
         projected = snapshot.projected_average
         limit = snapshot.agreed_power_w
 
+        # Unknown tariff block (sensor unavailable/invalid): do nothing and keep
+        # the current state — it could be an expensive block.
+        if tariff == 0:
+            return
+
         # Outside shed blocks: restore what we turned off
         if tariff not in SHED_TARIFF_BLOCKS:
             if self._shed:
@@ -137,6 +142,11 @@ class LoadShedController:
             return
 
         if limit <= 0 or not self.devices:
+            return
+
+        # Window started mid-way (restart/reload): the projection rests on
+        # backfilled energy, so neither shed nor restore until the next window.
+        if not snapshot.window_complete:
             return
 
         # Shed: projection above limit + threshold, after stabilization

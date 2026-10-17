@@ -32,6 +32,11 @@ from .window import project_average, window_start_for
 _LOGGER = logging.getLogger(__name__)
 
 
+def _seconds_between(start: datetime, end: datetime) -> float:
+    """Elapsed seconds between two aware datetimes (DST-safe, uses UTC timestamps)."""
+    return end.timestamp() - start.timestamp()
+
+
 @dataclass
 class WindowSnapshot:
     """Computed values for the current 15-minute billing window."""
@@ -43,13 +48,16 @@ class WindowSnapshot:
     running_average: float
     projected_average: float
     completed_average: float | None
-    tariff_block: int
+    tariff_block: int  # 0 = unknown / invalid tariff sensor
     agreed_power_w: float
-    headroom_w: float
-    over_limit: bool
+    headroom_w: float | None  # None when the limit is unknown
+    over_limit: bool | None  # None when the limit is unknown
     measurement_count: int
     shedding_active: bool
     shed_devices: list[str]
+    # False when the window began mid-way (restart/reload): energy before the
+    # start was backfilled with the current power, so shedding must not trust it.
+    window_complete: bool = True
 
 
 class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
@@ -74,6 +82,7 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
 
         self._agreed_kw: dict[int, float] = dict(DEFAULT_AGREED_KW)
         self._window_start: datetime | None = None
+        self._window_complete: bool = True
         self._samples: list[tuple[datetime, float]] = []
         self._energy_ws: float = 0.0  # watt-seconds in current window
         self._last_sample_time: datetime | None = None
@@ -81,6 +90,9 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         self._completed_average: float | None = None
         self._unsub_state = None
         self._unsub_interval = None
+        # Shed evaluation stays off until number/switch entities restored their
+        # values (see async_mark_ready), so defaults never trigger an action.
+        self._ready: bool = False
 
         devices = list(config.get(CONF_DEVICES) or [])
         notify = [
@@ -128,11 +140,18 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         """Push updated snapshot (e.g. after shed list changes)."""
         self.async_set_updated_data(self._compute())
 
+    @callback
+    def async_mark_ready(self) -> None:
+        """Allow shed evaluation once all entities restored their state."""
+        self._ready = True
+        self._publish()
+
     async def async_start(self) -> None:
         """Start listening to power/tariff sensors."""
         await self.controller.async_load()
-        self._reset_window(dt_util.now())
-        self._ingest_power(dt_util.now(), force=True)
+        now = dt_util.now()
+        self._init_window(now)
+        self._ingest_power(now, force=True)
 
         self._unsub_state = async_track_state_change_event(
             self.hass,
@@ -170,10 +189,11 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
 
     @callback
     def _publish(self) -> None:
-        """Update listeners and schedule shed evaluation."""
+        """Update listeners and (once ready) schedule shed evaluation."""
         snapshot = self._compute()
         self.async_set_updated_data(snapshot)
-        self.hass.async_create_task(self.controller.async_evaluate(snapshot))
+        if self._ready:
+            self.hass.async_create_task(self.controller.async_evaluate(snapshot))
 
     def _read_power(self) -> float | None:
         """Read current import power in W (export clamped to 0)."""
@@ -189,7 +209,7 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             return None
 
     def _read_tariff(self) -> int:
-        """Read current network tariff block 1–5."""
+        """Read current network tariff block 1–5 (0 = unknown/invalid)."""
         state = self.hass.states.get(self.tariff_sensor)
         if state is None or state.state in ("unknown", "unavailable", None, ""):
             return 0
@@ -199,35 +219,57 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             return 0
         return block if 1 <= block <= 5 else 0
 
-    def _reset_window(self, now: datetime) -> None:
-        """Start a new 15-minute window."""
-        self._window_start = window_start_for(now)
-        self._samples = []
+    def _reset_window(
+        self, start: datetime, power: float, *, complete: bool
+    ) -> None:
+        """Begin a window at `start`; `power` is the power in force at `start`."""
+        self._window_start = start
+        self._window_complete = complete
         self._energy_ws = 0.0
-        self._last_sample_time = now
+        self._last_sample_time = start
+        self._last_power = power
+        self._samples = [(start, power)]
+        _LOGGER.debug("Window reset at %s (complete=%s)", start, complete)
+
+    def _init_window(self, now: datetime) -> None:
+        """Start tracking mid-window (startup/reload).
+
+        The window is anchored at its real start so elapsed time is correct;
+        the unknown energy before `now` is backfilled with the current power
+        and the window is flagged incomplete.
+        """
+        start = window_start_for(now)
         power = self._read_power()
-        self._last_power = power if power is not None else 0.0
-        self._samples.append((now, self._last_power))
-        _LOGGER.debug("Window reset at %s", self._window_start)
+        complete = _seconds_between(start, now) <= UPDATE_INTERVAL_SECONDS
+        self._reset_window(start, power if power is not None else 0.0, complete=complete)
+
+    def _roll_windows(self, now: datetime) -> None:
+        """Close every window that ended before `now`, carrying power over."""
+        assert self._window_start is not None
+        while _seconds_between(self._window_start, now) >= WINDOW_SECONDS:
+            boundary = datetime.fromtimestamp(
+                self._window_start.timestamp() + WINDOW_SECONDS, tz=now.tzinfo
+            )
+            if self._last_sample_time is not None:
+                dt = _seconds_between(self._last_sample_time, boundary)
+                if dt > 0:
+                    self._energy_ws += self._last_power * dt
+            if self._window_complete:
+                self._completed_average = round(self._energy_ws / WINDOW_SECONDS, 2)
+            else:
+                # Partial window (started mid-way): its average is not reliable.
+                self._completed_average = None
+            # The new window starts exactly on the boundary with the power that
+            # was in force; the time from boundary to `now` is integrated below.
+            self._reset_window(boundary, self._last_power, complete=True)
 
     def _ingest_power(self, now: datetime, force: bool = False) -> None:
         """Integrate power into the current window; roll over at boundaries."""
         if self._window_start is None:
-            self._reset_window(now)
+            self._init_window(now)
             return
 
-        current_start = window_start_for(now)
-        if current_start != self._window_start:
-            boundary = current_start
-            if self._last_sample_time and self._last_sample_time < boundary:
-                dt = (boundary - self._last_sample_time).total_seconds()
-                if dt > 0:
-                    self._energy_ws += self._last_power * dt
-            if WINDOW_SECONDS > 0:
-                self._completed_average = round(self._energy_ws / WINDOW_SECONDS, 2)
-            else:
-                self._completed_average = None
-            self._reset_window(now)
+        self._roll_windows(now)
 
         power = self._read_power()
         if power is None and not force:
@@ -236,7 +278,7 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             power = 0.0
 
         if self._last_sample_time is not None:
-            dt = (now - self._last_sample_time).total_seconds()
+            dt = _seconds_between(self._last_sample_time, now)
             if dt > 0:
                 self._energy_ws += self._last_power * dt
 
@@ -250,17 +292,17 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         """Compute running average, projection, headroom."""
         now = dt_util.now()
         if self._window_start is None:
-            self._reset_window(now)
+            self._init_window(now)
 
         assert self._window_start is not None
 
-        elapsed = (now - self._window_start).total_seconds()
+        elapsed = _seconds_between(self._window_start, now)
         elapsed = max(0.0, min(elapsed, float(WINDOW_SECONDS)))
         remaining = float(WINDOW_SECONDS) - elapsed
 
         energy_ws = self._energy_ws
         if self._last_sample_time is not None:
-            dt = (now - self._last_sample_time).total_seconds()
+            dt = _seconds_between(self._last_sample_time, now)
             if dt > 0:
                 energy_ws += self._last_power * dt
 
@@ -269,10 +311,10 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         )
 
         tariff = self._read_tariff()
-        agreed_kw = self.get_agreed_kw(tariff) if tariff else 0.0
-        agreed_w = agreed_kw * 1000.0
-        headroom = agreed_w - projected_average if agreed_w > 0 else 0.0
-        over_limit = bool(agreed_w > 0 and projected_average > agreed_w)
+        agreed_w = self.get_agreed_kw(tariff) * 1000.0 if tariff else 0.0
+        limit_known = tariff != 0 and agreed_w > 0
+        headroom = round(agreed_w - projected_average, 2) if limit_known else None
+        over_limit = projected_average > agreed_w if limit_known else None
 
         return WindowSnapshot(
             window_start=self._window_start,
@@ -284,9 +326,10 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             completed_average=self._completed_average,
             tariff_block=tariff,
             agreed_power_w=round(agreed_w, 2),
-            headroom_w=round(headroom, 2),
+            headroom_w=headroom,
             over_limit=over_limit,
             measurement_count=len(self._samples),
             shedding_active=self.controller.shedding_active,
             shed_devices=self.controller.shed_entity_ids,
+            window_complete=self._window_complete,
         )

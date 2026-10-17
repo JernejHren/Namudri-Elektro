@@ -60,6 +60,7 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
             ATTR_CURRENT_POWER: d.current_power,
             ATTR_RUNNING_AVERAGE: d.running_average,
             ATTR_MEASUREMENT_COUNT: d.measurement_count,
+            "window_complete": d.window_complete,
         },
     ),
     NamudriSensorDescription(
