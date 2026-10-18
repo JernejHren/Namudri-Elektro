@@ -6,106 +6,74 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_SHED_DEVICES, CONF_NAME, DOMAIN, VERSION
-from .coordinator import NamudriCoordinator
+from .const import ATTR_SHED_DEVICES
+from .coordinator import NamudriConfigEntry, NamudriCoordinator
+from .entity import NamudriCoordinatorEntity
+
+# Coordinator-driven, nothing is polled: no limit on parallel updates
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: NamudriConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up binary sensors."""
-    coordinator: NamudriCoordinator = hass.data[DOMAIN][entry.entry_id]
-    name = entry.data.get(CONF_NAME, "Namudri Elektro")
+    coordinator = entry.runtime_data
     async_add_entities(
         [
-            OverLimitBinarySensor(coordinator, entry, name),
-            SheddingActiveBinarySensor(coordinator, entry, name),
+            OverLimitBinarySensor(coordinator, entry),
+            SheddingActiveBinarySensor(coordinator, entry),
         ]
     )
 
 
-class _NamudriBinarySensor(CoordinatorEntity[NamudriCoordinator], BinarySensorEntity):
-    """Base binary sensor on the Namudri device."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: NamudriCoordinator,
-        entry: ConfigEntry,
-        device_name: str,
-        unique_suffix: str,
-    ) -> None:
-        """Initialize binary sensor."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=device_name,
-            manufacturer="Namudri",
-            model="Elektro",
-            sw_version=VERSION,
-        )
-
-
-class OverLimitBinarySensor(_NamudriBinarySensor):
+class OverLimitBinarySensor(NamudriCoordinatorEntity, BinarySensorEntity):
     """True when projected 15-min average exceeds agreed power."""
 
     _attr_translation_key = "over_agreed_power"
-    _attr_name = "Over agreed power"
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
     def __init__(
-        self,
-        coordinator: NamudriCoordinator,
-        entry: ConfigEntry,
-        device_name: str,
+        self, coordinator: NamudriCoordinator, entry: NamudriConfigEntry
     ) -> None:
         """Initialize over-limit sensor."""
-        super().__init__(coordinator, entry, device_name, "over_limit")
+        super().__init__(coordinator, entry, "over_limit")
+
+    @property
+    def available(self) -> bool:
+        """Unavailable while the power or the tariff sensor is unavailable."""
+        data = self.coordinator.data
+        return super().available and data.power_valid and data.tariff_block != 0
 
     @property
     def is_on(self) -> bool | None:
-        """Return True if projected average exceeds agreed power."""
-        if self.coordinator.data is None:
-            return None
+        """Projected average above agreed power (unknown if no limit is set)."""
         return self.coordinator.data.over_limit
 
 
-class SheddingActiveBinarySensor(_NamudriBinarySensor):
+class SheddingActiveBinarySensor(NamudriCoordinatorEntity, BinarySensorEntity):
     """True while at least one device is auto-shed by Namudri."""
 
     _attr_translation_key = "shedding_active"
-    _attr_name = "Shedding active"
     _attr_device_class = BinarySensorDeviceClass.RUNNING
 
     def __init__(
-        self,
-        coordinator: NamudriCoordinator,
-        entry: ConfigEntry,
-        device_name: str,
+        self, coordinator: NamudriCoordinator, entry: NamudriConfigEntry
     ) -> None:
         """Initialize shedding-active sensor."""
-        super().__init__(coordinator, entry, device_name, "shedding_active")
+        super().__init__(coordinator, entry, "shedding_active")
 
     @property
     def is_on(self) -> bool | None:
         """Return True if auto-shed list is non-empty."""
-        if self.coordinator.data is None:
-            return None
         return self.coordinator.data.shedding_active
 
     @property
     def extra_state_attributes(self) -> dict | None:
         """List of currently auto-shed entities."""
-        if self.coordinator.data is None:
-            return None
         return {ATTR_SHED_DEVICES: self.coordinator.data.shed_devices}

@@ -10,14 +10,11 @@ from homeassistant.components.number import (
     NumberMode,
     RestoreNumber,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower, UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    CONF_NAME,
     DEFAULT_AGREED_KW,
     DEFAULT_HYSTERESIS_W,
     DEFAULT_MAX_OFF_MINUTES,
@@ -26,10 +23,12 @@ from .const import (
     DEFAULT_SMOOTHING_SECONDS,
     DEFAULT_STABILIZATION_SECONDS,
     DEFAULT_THRESHOLD_W,
-    DOMAIN,
-    VERSION,
 )
-from .coordinator import NamudriCoordinator
+from .coordinator import NamudriConfigEntry, NamudriCoordinator
+from .entity import build_device_info
+
+# Local, instant actions: no limit on parallel updates
+PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -38,7 +37,6 @@ class ShedNumberSpec:
 
     key: str
     translation_key: str
-    name: str
     default: float
     min_value: float
     max_value: float
@@ -80,7 +78,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="shed_threshold",
         translation_key="shed_threshold",
-        name="Shed threshold",
         default=DEFAULT_THRESHOLD_W,
         min_value=0.0,
         max_value=5000.0,
@@ -92,7 +89,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="shed_hysteresis",
         translation_key="shed_hysteresis",
-        name="Restore hysteresis",
         default=DEFAULT_HYSTERESIS_W,
         min_value=0.0,
         max_value=5000.0,
@@ -104,7 +100,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="min_off_minutes",
         translation_key="min_off_minutes",
-        name="Minimum off time",
         default=DEFAULT_MIN_OFF_MINUTES,
         min_value=1.0,
         max_value=720.0,
@@ -116,7 +111,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="stabilization_seconds",
         translation_key="stabilization_seconds",
-        name="Projection stabilization",
         default=DEFAULT_STABILIZATION_SECONDS,
         min_value=0.0,
         max_value=900.0,
@@ -128,7 +122,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="max_off_minutes",
         translation_key="max_off_minutes",
-        name="Maximum off time",
         default=DEFAULT_MAX_OFF_MINUTES,
         min_value=0.0,
         max_value=1440.0,
@@ -140,7 +133,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="power_smoothing_seconds",
         translation_key="power_smoothing",
-        name="Power smoothing",
         default=DEFAULT_SMOOTHING_SECONDS,
         min_value=0.0,
         max_value=300.0,
@@ -152,7 +144,6 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
     ShedNumberSpec(
         key="sensor_timeout_seconds",
         translation_key="sensor_timeout",
-        name="Sensor timeout",
         default=DEFAULT_SENSOR_TIMEOUT_SECONDS,
         min_value=0.0,
         max_value=3600.0,
@@ -166,18 +157,15 @@ SHED_NUMBERS: tuple[ShedNumberSpec, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: NamudriConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up number entities."""
-    coordinator: NamudriCoordinator = hass.data[DOMAIN][entry.entry_id]
-    name = entry.data.get(CONF_NAME, "Namudri Elektro")
+    coordinator = entry.runtime_data
     entities: list[RestoreNumber] = [
-        AgreedPowerNumber(coordinator, entry, name, block) for block in range(1, 6)
+        AgreedPowerNumber(coordinator, entry, block) for block in range(1, 6)
     ]
-    entities.extend(
-        ShedTuningNumber(coordinator, entry, name, spec) for spec in SHED_NUMBERS
-    )
+    entities.extend(ShedTuningNumber(coordinator, entry, spec) for spec in SHED_NUMBERS)
     async_add_entities(entities)
 
 
@@ -186,6 +174,7 @@ class AgreedPowerNumber(RestoreNumber):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = NumberMode.BOX
     _attr_device_class = NumberDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
@@ -196,24 +185,16 @@ class AgreedPowerNumber(RestoreNumber):
     def __init__(
         self,
         coordinator: NamudriCoordinator,
-        entry: ConfigEntry,
-        device_name: str,
+        entry: NamudriConfigEntry,
         block: int,
     ) -> None:
         """Initialize number entity."""
         self._coordinator = coordinator
         self._block = block
         self._attr_translation_key = f"agreed_power_t{block}"
-        self._attr_name = f"Agreed power T{block}"
         self._attr_unique_id = f"{entry.entry_id}_agreed_t{block}"
         self._attr_native_value = DEFAULT_AGREED_KW[block]
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=device_name,
-            manufacturer="Namudri",
-            model="Elektro",
-            sw_version=VERSION,
-        )
+        self._attr_device_info = build_device_info(entry)
 
     async def async_added_to_hass(self) -> None:
         """Restore last value and sync coordinator."""
@@ -235,20 +216,19 @@ class ShedTuningNumber(RestoreNumber):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = NumberMode.BOX
 
     def __init__(
         self,
         coordinator: NamudriCoordinator,
-        entry: ConfigEntry,
-        device_name: str,
+        entry: NamudriConfigEntry,
         spec: ShedNumberSpec,
     ) -> None:
         """Initialize shed tuning number."""
         self._coordinator = coordinator
         self._spec = spec
         self._attr_translation_key = spec.translation_key
-        self._attr_name = spec.name
         self._attr_unique_id = f"{entry.entry_id}_{spec.key}"
         self._attr_native_value = spec.default
         self._attr_native_min_value = spec.min_value
@@ -256,13 +236,7 @@ class ShedTuningNumber(RestoreNumber):
         self._attr_native_step = spec.step
         self._attr_native_unit_of_measurement = spec.unit
         self._attr_device_class = spec.device_class
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=device_name,
-            manufacturer="Namudri",
-            model="Elektro",
-            sw_version=VERSION,
-        )
+        self._attr_device_info = build_device_info(entry)
 
     async def async_added_to_hass(self) -> None:
         """Restore and apply to controller."""

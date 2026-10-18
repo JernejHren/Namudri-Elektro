@@ -113,6 +113,20 @@ class LoadShedController:
             {"shed": self._shed, "device_power": self._device_power}
         )
 
+    def diagnostics(self) -> dict[str, Any]:
+        """Settings and state for the diagnostics download."""
+        return {
+            "enabled": self.enabled,
+            "devices": list(self.devices),
+            "threshold_w": self.threshold_w,
+            "hysteresis_w": self.hysteresis_w,
+            "min_off_minutes": self.min_off_minutes,
+            "max_off_minutes": self.max_off_minutes,
+            "stabilization_seconds": self.stabilization_seconds,
+            "shed": {eid: dict(rec) for eid, rec in self._shed.items()},
+            "learned_device_power_w": dict(self._device_power),
+        }
+
     def set_devices(self, devices: list[str]) -> None:
         """Update controllable device list."""
         self.devices = [d for d in devices if d]

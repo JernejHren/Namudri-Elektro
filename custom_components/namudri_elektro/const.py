@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 DOMAIN = "namudri_elektro"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 CONF_POWER_SENSOR = "power_sensor"
 CONF_TARIFF_SENSOR = "tariff_sensor"
 CONF_NAME = "name"
+DEFAULT_NAME = "Namudri Elektro"
 CONF_DEVICES = "devices"
 CONF_NOTIFY = "notify_services"  # list of notify targets picked from a list
 CONF_NOTIFY_1 = "notify_1"  # legacy free-text fields (still read for old entries)

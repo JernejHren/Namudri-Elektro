@@ -30,8 +30,11 @@ def _module(name: str, **attrs) -> types.ModuleType:
 
 def _install_stubs() -> None:
     class DataUpdateCoordinator:
-        def __init__(self, hass, logger, *, name=None, update_interval=None):
+        def __init__(
+            self, hass, logger, *, config_entry=None, name=None, update_interval=None
+        ):
             self.hass = hass
+            self.config_entry = config_entry
             self.data = None
 
         def __class_getitem__(cls, item):
@@ -68,6 +71,7 @@ def _install_stubs() -> None:
         DataUpdateCoordinator=DataUpdateCoordinator,
     )
     storage = _module("homeassistant.helpers.storage", Store=Store)
+    config_entries = _module("homeassistant.config_entries", ConfigEntry=object)
     util = _module("homeassistant.util")
     dt_mod = _module(
         "homeassistant.util.dt",
@@ -76,22 +80,49 @@ def _install_stubs() -> None:
         parse_datetime=datetime.fromisoformat,
     )
     ha.core, ha.helpers, ha.util = core, helpers, util
+    ha.config_entries = config_entries
     helpers.event, helpers.update_coordinator, helpers.storage = event, update, storage
     util.dt = dt_mod
 
 
+def _await(coro):
+    """Run a coroutine on a private loop (the global loop belongs to the HA plugin)."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _is_ha(name: str) -> bool:
+    return name == "homeassistant" or name.startswith("homeassistant.")
+
+
 def _load_component():
+    """Import the component against stubs, then give the real HA modules back.
+
+    The imported modules keep their references to the stubs, while the tests
+    that run against a real Home Assistant (other files) are not affected.
+    """
     for name in [n for n in sys.modules if n == PKG or n.startswith(f"{PKG}.")]:
         del sys.modules[name]
-    _install_stubs()
-    pkg = types.ModuleType(PKG)
-    pkg.__path__ = [str(COMPONENT)]
-    sys.modules[PKG] = pkg
-    return (
-        importlib.import_module(f"{PKG}.const"),
-        importlib.import_module(f"{PKG}.coordinator"),
-        importlib.import_module(f"{PKG}.controller"),
-    )
+    real = {n: m for n, m in sys.modules.items() if _is_ha(n)}
+    for name in real:
+        del sys.modules[name]
+    try:
+        _install_stubs()
+        pkg = types.ModuleType(PKG)
+        pkg.__path__ = [str(COMPONENT)]
+        sys.modules[PKG] = pkg
+        return (
+            importlib.import_module(f"{PKG}.const"),
+            importlib.import_module(f"{PKG}.coordinator"),
+            importlib.import_module(f"{PKG}.controller"),
+        )
+    finally:
+        for name in [n for n in sys.modules if _is_ha(n)]:
+            del sys.modules[name]
+        sys.modules.update(real)
 
 
 const, coordinator_mod, controller_mod = _load_component()
@@ -129,11 +160,14 @@ class FakeServices:
         self.payloads: list[dict] = []
         self.lag_entities: set[str] = set()  # accept turn_off but report it late
         self.fail_entities: set[str] = set()  # turn_off raises
+        self.fail_services: set[str] = set()  # these service names always raise
 
     async def async_call(self, domain, service, data, blocking=False) -> None:
         entity_id = data.get("entity_id")
         self.calls.append((domain, service, entity_id))
         self.payloads.append(dict(data))
+        if service in self.fail_services:
+            raise RuntimeError(f"{service} failed")
         if service == "turn_off" and entity_id in self.fail_entities:
             raise RuntimeError("device unreachable")
         if service == "turn_off":
@@ -317,7 +351,7 @@ def test_unknown_tariff_keeps_shed_devices_off() -> None:
     hass.states.set("switch.a", "off")
     ctrl = _controller(hass, {"switch.a": dict(_SHED_RECORD)})
 
-    asyncio.run(ctrl.async_evaluate(_snap(tariff_block=0, projected_average=0.0)))
+    _await(ctrl.async_evaluate(_snap(tariff_block=0, projected_average=0.0)))
 
     assert hass.services.calls == []
     assert "switch.a" in ctrl._shed
@@ -328,7 +362,7 @@ def test_outside_shed_blocks_still_restores() -> None:
     hass.states.set("switch.a", "off")
     ctrl = _controller(hass, {"switch.a": dict(_SHED_RECORD)})
 
-    asyncio.run(ctrl.async_evaluate(_snap(tariff_block=3, projected_average=0.0)))
+    _await(ctrl.async_evaluate(_snap(tariff_block=3, projected_average=0.0)))
 
     assert ("switch", "turn_on", "switch.a") in hass.services.calls
     assert ctrl._shed == {}
@@ -339,7 +373,7 @@ def test_no_shedding_in_partial_window() -> None:
     hass.states.set("switch.a", "on")
     ctrl = _controller(hass)
 
-    asyncio.run(ctrl.async_evaluate(_snap(window_complete=False)))
+    _await(ctrl.async_evaluate(_snap(window_complete=False)))
 
     assert hass.services.calls == []
 
@@ -349,7 +383,7 @@ def test_sheds_in_complete_window() -> None:
     hass.states.set("switch.a", "on")
     ctrl = _controller(hass)
 
-    asyncio.run(ctrl.async_evaluate(_snap()))
+    _await(ctrl.async_evaluate(_snap()))
 
     assert ("switch", "turn_off", "switch.a") in hass.services.calls
     assert "switch.a" in ctrl._shed
@@ -360,7 +394,7 @@ def test_sheds_in_complete_window() -> None:
 
 def _run(ctrl, snap, now: datetime) -> None:
     _clock["now"] = now
-    asyncio.run(ctrl.async_evaluate(snap))
+    _await(ctrl.async_evaluate(snap))
 
 
 def _record(off_since: str = "2026-10-13T20:00:00+02:00") -> dict:
@@ -450,7 +484,7 @@ def test_shed_list_survives_restart() -> None:
         return saved
 
     ctrl2._store.async_load = _load
-    asyncio.run(ctrl2.async_load())
+    _await(ctrl2.async_load())
     assert "switch.a" in ctrl2._shed
 
 
@@ -460,7 +494,7 @@ def test_force_shed_needs_shedding_enabled() -> None:
     ctrl = _controller(hass)
     ctrl.enabled = False
 
-    assert asyncio.run(ctrl.async_force_shed()) is None
+    assert _await(ctrl.async_force_shed()) is None
     assert hass.services.calls == []
 
 
@@ -521,7 +555,7 @@ def test_force_shed_sheds_next_device() -> None:
     ctrl = _controller(hass)
     _clock["now"] = at(5)
 
-    assert asyncio.run(ctrl.async_force_shed()) == "switch.a"
+    assert _await(ctrl.async_force_shed()) == "switch.a"
     assert ("switch", "turn_off", "switch.a") in hass.services.calls
     assert "switch.a" in ctrl._shed
 
@@ -766,7 +800,7 @@ def test_learned_power_survives_restart() -> None:
     hass = FakeHass()
     ctrl = _controller(hass)
     ctrl._device_power = {"switch.a": 1200.0}
-    asyncio.run(ctrl.async_save())
+    _await(ctrl.async_save())
     saved = ctrl._store.saved
 
     ctrl2 = _controller(hass)
@@ -775,7 +809,7 @@ def test_learned_power_survives_restart() -> None:
         return saved
 
     ctrl2._store.async_load = _load
-    asyncio.run(ctrl2.async_load())
+    _await(ctrl2.async_load())
     assert ctrl2._device_power == {"switch.a": 1200.0}
 
 
@@ -813,3 +847,214 @@ def test_shed_cooldown_covers_the_smoothing_window() -> None:
 
     _run(ctrl, _snap(), at(5, 40))
     assert _offs(hass) == ["switch.a", "switch.b"]
+
+
+# --- controller: less common paths -----------------------------------------
+
+
+def test_set_devices_forgets_removed_shed_devices() -> None:
+    hass = FakeHass()
+    ctrl = _controller(
+        hass,
+        {"switch.a": _record(), "switch.b": _record()},
+        devices=("switch.a", "switch.b"),
+    )
+
+    ctrl.set_devices(["switch.a", ""])
+
+    assert ctrl.devices == ["switch.a"]
+    assert ctrl.shed_entity_ids == ["switch.a"]
+
+
+def test_set_notify_services_drops_blanks() -> None:
+    ctrl = _controller(FakeHass())
+    ctrl.set_notify_services(["notify.x", ""])
+    assert ctrl.notify_services == ["notify.x"]
+
+
+def test_evaluation_is_skipped_while_another_one_runs() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass)
+
+    async def scenario() -> None:
+        async with ctrl._lock:
+            await ctrl.async_evaluate(_snap())
+
+    _clock["now"] = at(5)
+    _await(scenario())
+
+    assert hass.services.calls == []
+
+
+def test_shed_skips_missing_unavailable_and_already_off_devices() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.unavailable", "unavailable")
+    hass.states.set("switch.off", "off")
+    hass.states.set("switch.on", "on")
+    ctrl = _controller(
+        hass,
+        devices=("switch.missing", "switch.unavailable", "switch.off", "switch.on"),
+    )
+
+    _run(ctrl, _snap(), at(5))
+
+    assert _offs(hass) == ["switch.on"]
+
+
+def test_record_is_dropped_when_the_device_was_switched_on_meanwhile() -> None:
+    """Right after a shed the override check waits; the restore check does not."""
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    ctrl = _controller(hass, {"switch.a": _record("2026-10-13T20:00:00+02:00")})
+    ctrl.min_off_minutes = 0
+
+    _run(ctrl, _snap(tariff_block=3, projected_average=0.0), at(0, 10))
+
+    assert ctrl._shed == {}
+    assert hass.services.calls == []
+    assert ctrl._store.saved["shed"] == {}
+
+
+def test_restore_all_skips_devices_that_are_already_on() -> None:
+    hass = FakeHass()
+    hass.states.set("switch.a", "on")
+    hass.states.set("switch.b", "off")
+    ctrl = _controller(
+        hass,
+        {"switch.a": _record(), "switch.b": _record()},
+        devices=("switch.a", "switch.b"),
+    )
+
+    _await(ctrl.async_restore_all(reason="test"))
+
+    assert hass.services.calls == [("switch", "turn_on", "switch.b")]
+    assert ctrl._shed == {}
+
+
+def test_unreadable_off_since_is_handled(monkeypatch) -> None:
+    ctrl = _controller(FakeHass())
+    ctrl.max_off_minutes = 60
+    _clock["now"] = at(5)
+
+    assert ctrl._seconds_off({}) is None
+    assert ctrl._seconds_off({"off_since": "garbage"}) is None
+    assert ctrl._seconds_off({"off_since": "2026-10-13T19:00:00"}) is None  # naive
+    monkeypatch.setattr(controller_mod.dt_util, "parse_datetime", lambda raw: None)
+    assert ctrl._seconds_off({"off_since": "2026-10-13T19:00:00+02:00"}) is None
+
+    assert ctrl._min_off_elapsed({}) is True
+    assert ctrl._max_off_elapsed({}) is False  # unknown age: never force
+    ctrl.max_off_minutes = 0
+    assert ctrl._max_off_elapsed(_record()) is False
+
+
+def test_climate_previous_state_is_captured_and_restored() -> None:
+    hass = FakeHass()
+    state = SimpleNamespace(state="heat", attributes={"temperature": 21})
+    previous = controller_mod.LoadShedController._capture_previous("climate.ac", state)
+    assert previous == {"domain": "climate", "state": "heat", "hvac_mode": "heat", "temperature": 21}
+    ctrl = _controller(hass)
+
+    assert _await(ctrl._turn_on("climate.ac", previous)) is True
+
+    assert [c[1] for c in hass.services.calls] == ["set_hvac_mode", "set_temperature"]
+    assert hass.services.payloads[1]["temperature"] == 21
+
+
+def test_climate_without_a_remembered_mode_is_just_turned_on() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass)
+
+    _await(ctrl._turn_on("climate.ac", {"state": "off"}))
+
+    assert hass.services.calls == [("climate", "turn_on", "climate.ac")]
+
+
+def test_water_heater_falls_back_to_turn_on() -> None:
+    hass = FakeHass()
+    hass.services.fail_services.add("set_operation_mode")
+    ctrl = _controller(hass)
+
+    assert _await(ctrl._turn_on("water_heater.tank", {"operation_mode": "eco"})) is True
+
+    assert [c[1] for c in hass.services.calls] == ["set_operation_mode", "turn_on"]
+
+
+def test_failed_turn_on_is_reported() -> None:
+    hass = FakeHass()
+    hass.services.fail_services.add("turn_on")
+    ctrl = _controller(hass)
+
+    assert _await(ctrl._turn_on("switch.a", {})) is False
+
+
+def test_failing_notify_service_does_not_break_the_controller() -> None:
+    hass = FakeHass()
+    hass.services.fail_services.add("mobile_app_gone")
+    ctrl = _controller(hass)
+    ctrl.notify_services = ["notify.mobile_app_gone"]
+
+    _await(ctrl._notify("title", "message"))  # must not raise
+
+    assert hass.services.calls == [("notify", "mobile_app_gone", None)]
+
+
+# --- coordinator: edge cases --------------------------------------------------
+
+
+def test_unknown_block_is_ignored_when_setting_agreed_power() -> None:
+    coord, _ = make_coordinator()
+    coord.set_agreed_kw(9, 5.0)
+    assert 9 not in coord.agreed_kw
+
+
+@pytest.mark.parametrize(("state", "block"), [("abc", 0), ("7", 0), ("0", 0), ("2.0", 2), ("5", 5)])
+def test_tariff_block_parsing(state: str, block: int) -> None:
+    coord, hass = make_coordinator()
+    hass.states.set("sensor.t", state)
+    assert coord._read_tariff() == block
+
+
+def test_non_numeric_power_is_invalid() -> None:
+    coord, hass = make_coordinator()
+    hass.states.set("sensor.p", "abc")
+
+    assert coord._read_power() is None
+    assert coord._read_power(warn=False) is None
+    assert coord._compute().power_valid is False
+
+
+def test_missing_power_keeps_the_last_value_unless_forced() -> None:
+    coord, hass = make_coordinator(power="2000")
+    hass.states.set("sensor.p", "unavailable")
+
+    coord._ingest_power(at(1))
+    assert coord._last_power == 2000.0  # carried over
+
+    coord._ingest_power(at(2), force=True)
+    assert coord._last_power == 0.0  # forced: nothing known
+
+
+def test_sample_history_is_trimmed() -> None:
+    coord, hass = make_coordinator()
+    coord._samples = [(at(0), 1000.0)] * 2000
+
+    advance(coord, hass, at(1))
+
+    assert len(coord._samples) == 1000  # 2001 > 2000 -> the newest 1000 are kept
+
+
+def test_window_is_created_on_first_use() -> None:
+    coord, _ = make_coordinator(now=at(5))
+    coord._window_start = None
+    coord._ingest_power(at(5, 10))
+    assert coord._window_start == at(0)
+
+    coord._window_start = None
+    assert coord._compute().window_start == at(0)
+
+
+def test_notify_target_given_as_a_single_string() -> None:
+    cfg = {const.CONF_NOTIFY: "notify.mobile_app_a"}
+    assert notify_helpers.notify_targets(cfg) == ["notify.mobile_app_a"]

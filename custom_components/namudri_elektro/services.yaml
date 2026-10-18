@@ -1,23 +1,15 @@
 restore_all:
-  name: Restore all shed devices
-  description: Turn back on every device that Namudri auto-shed (ignores min off time).
   fields:
     entry_id:
-      name: Config entry ID
-      description: Optional. If omitted, restores for all Namudri instances.
-      example: "01ABCDEF"
       required: false
+      example: "01ABCDEF"
       selector:
         text:
 
 force_shed:
-  name: Force shed next device
-  description: Turn off the next device in priority order right now (ignores the projection; needs load shedding enabled).
   fields:
     entry_id:
-      name: Config entry ID
-      description: Optional. If omitted, applies to all Namudri instances.
-      example: "01ABCDEF"
       required: false
+      example: "01ABCDEF"
       selector:
         text:

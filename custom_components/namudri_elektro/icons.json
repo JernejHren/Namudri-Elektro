@@ -1,0 +1,95 @@
+{
+  "entity": {
+    "sensor": {
+      "projected_power": {
+        "default": "mdi:chart-timeline-variant"
+      },
+      "running_average": {
+        "default": "mdi:chart-line"
+      },
+      "completed_window": {
+        "default": "mdi:history"
+      },
+      "agreed_power": {
+        "default": "mdi:transmission-tower"
+      },
+      "headroom": {
+        "default": "mdi:gauge-low"
+      },
+      "tariff_block": {
+        "default": "mdi:numeric"
+      },
+      "shed_device_count": {
+        "default": "mdi:power-plug-off"
+      }
+    },
+    "binary_sensor": {
+      "over_agreed_power": {
+        "default": "mdi:check-circle-outline",
+        "state": {
+          "on": "mdi:alert-circle"
+        }
+      },
+      "shedding_active": {
+        "default": "mdi:power-plug",
+        "state": {
+          "on": "mdi:power-plug-off"
+        }
+      }
+    },
+    "switch": {
+      "load_shedding": {
+        "default": "mdi:flash-off",
+        "state": {
+          "off": "mdi:flash-off-outline"
+        }
+      }
+    },
+    "number": {
+      "agreed_power_t1": {
+        "default": "mdi:transmission-tower"
+      },
+      "agreed_power_t2": {
+        "default": "mdi:transmission-tower"
+      },
+      "agreed_power_t3": {
+        "default": "mdi:transmission-tower"
+      },
+      "agreed_power_t4": {
+        "default": "mdi:transmission-tower"
+      },
+      "agreed_power_t5": {
+        "default": "mdi:transmission-tower"
+      },
+      "shed_threshold": {
+        "default": "mdi:arrow-expand-up"
+      },
+      "shed_hysteresis": {
+        "default": "mdi:arrow-expand-down"
+      },
+      "min_off_minutes": {
+        "default": "mdi:timer-off-outline"
+      },
+      "max_off_minutes": {
+        "default": "mdi:timer-alert-outline"
+      },
+      "stabilization_seconds": {
+        "default": "mdi:timer-sand"
+      },
+      "power_smoothing": {
+        "default": "mdi:chart-bell-curve"
+      },
+      "sensor_timeout": {
+        "default": "mdi:timer-cog-outline"
+      }
+    }
+  },
+  "services": {
+    "restore_all": {
+      "service": "mdi:restore"
+    },
+    "force_shed": {
+      "service": "mdi:flash-off"
+    }
+  }
+}

@@ -1,0 +1,100 @@
+# Self-assessment against the Home Assistant integration quality scale
+# https://contributors.home-assistant.io/core/quality-scale/
+# As a custom integration this has no official tier; Bronze and Silver are met
+# except "brands", the Gold rules that were cheap to do are done.
+rules:
+  # --- Bronze ---
+  action-setup: done
+  appropriate-polling:
+    status: done
+    comment: Nothing is polled; the coordinator follows the source sensors and a local 5 s timer.
+  brands:
+    status: todo
+    comment: No brand assets published yet.
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency:
+    status: exempt
+    comment: The integration has no external requirements.
+  docs-actions: done
+  docs-conditions:
+    status: exempt
+    comment: The integration provides no conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers:
+    status: exempt
+    comment: The integration provides no triggers.
+  entity-event-setup:
+    status: exempt
+    comment: Entities do not subscribe to events; the coordinator does.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  # --- Silver ---
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: Nothing needs authentication.
+  test-coverage: done
+
+  # --- Gold ---
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: It computes from existing entities; there is nothing to discover.
+  discovery-update-info:
+    status: exempt
+    comment: Nothing is discovered.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices:
+    status: exempt
+    comment: No hardware; any power sensor in W and any tariff block sensor can be used.
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: One device per config entry.
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow:
+    status: todo
+    comment: Sensors can be changed in the options flow; there is no separate reconfigure flow.
+  repair-issues:
+    status: todo
+    comment: Missing source sensors are only logged, no repair issue is raised.
+  stale-devices:
+    status: exempt
+    comment: One device per config entry.
+
+  # --- Platinum ---
+  async-dependency:
+    status: exempt
+    comment: No dependencies.
+  inject-websession:
+    status: exempt
+    comment: No web requests.
+  strict-typing:
+    status: todo
+    comment: Type hints are used but not checked with mypy strict.

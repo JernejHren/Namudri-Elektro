@@ -42,7 +42,6 @@ cards:
       - type: divider
       - entity: switch.namudri_elektro_load_shedding
       - entity: binary_sensor.namudri_elektro_shedding_active
-      - entity: sensor.namudri_elektro_shed_device_count
 
   - type: entities
     title: Agreed power and shed tuning
