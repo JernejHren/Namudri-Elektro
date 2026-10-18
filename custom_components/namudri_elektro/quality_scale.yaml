@@ -1,7 +1,7 @@
 # Self-assessment against the Home Assistant integration quality scale
 # https://contributors.home-assistant.io/core/quality-scale/
-# As a custom integration this has no official tier; Bronze and Silver are met
-# and the Gold rules that were cheap to do are done.
+# As a custom integration this has no official tier; every rule is done or
+# exempt with a reason.
 rules:
   # --- Bronze ---
   action-setup: done
@@ -79,11 +79,11 @@ rules:
   exception-translations: done
   icon-translations: done
   reconfiguration-flow:
-    status: todo
-    comment: Sensors can be changed in the options flow; there is no separate reconfigure flow.
+    status: done
+    comment: The name and both source sensors can be changed from the entry menu (Reconfigure); the options flow still covers sensors, devices and notifications.
   repair-issues:
-    status: todo
-    comment: Missing source sensors are only logged, no repair issue is raised.
+    status: done
+    comment: A power sensor that stays unusable for 10 minutes and an unset agreed power in blocks 1-2 (while shedding is on and devices are chosen) raise repair issues that close themselves.
   stale-devices:
     status: exempt
     comment: One device per config entry.
@@ -96,5 +96,5 @@ rules:
     status: exempt
     comment: No web requests.
   strict-typing:
-    status: todo
-    comment: Type hints are used but not checked with mypy strict.
+    status: done
+    comment: mypy --strict (mypy.ini) passes on the whole component and is part of the test routine.

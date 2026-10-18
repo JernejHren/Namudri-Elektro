@@ -71,6 +71,14 @@ def _install_stubs() -> None:
         DataUpdateCoordinator=DataUpdateCoordinator,
     )
     storage = _module("homeassistant.helpers.storage", Store=Store)
+    issue_registry = _module(
+        "homeassistant.helpers.issue_registry",
+        IssueSeverity=types.SimpleNamespace(WARNING="warning"),
+        async_create_issue=lambda hass, domain, issue_id, **kw: hass.issues.__setitem__(
+            issue_id, kw
+        ),
+        async_delete_issue=lambda hass, domain, issue_id: hass.issues.pop(issue_id, None),
+    )
     config_entries = _module("homeassistant.config_entries", ConfigEntry=object)
     util = _module("homeassistant.util")
     dt_mod = _module(
@@ -82,6 +90,7 @@ def _install_stubs() -> None:
     ha.core, ha.helpers, ha.util = core, helpers, util
     ha.config_entries = config_entries
     helpers.event, helpers.update_coordinator, helpers.storage = event, update, storage
+    helpers.issue_registry = issue_registry
     util.dt = dt_mod
 
 
@@ -182,6 +191,7 @@ class FakeHass:
         self.states = FakeStates()
         self.services = FakeServices(self.states)
         self.tasks: list = []
+        self.issues: dict = {}
 
     def async_create_task(self, coro) -> None:
         self.tasks.append(coro)
@@ -323,7 +333,12 @@ def test_evaluation_waits_until_ready() -> None:
 
 
 def _controller(hass, shed: dict | None = None, devices=("switch.a",)):
-    coord = SimpleNamespace(async_request_refresh_ui=lambda: None)
+    coord = SimpleNamespace(
+        async_request_refresh_ui=lambda: None,
+        power_sensor="sensor.p",
+        agreed={1: 7.0, 2: 9.0},
+    )
+    coord.get_agreed_kw = lambda block: coord.agreed.get(block, 0.0)
     ctrl = controller_mod.LoadShedController(hass, coord, "entry", list(devices), [])
     ctrl._shed = shed or {}
     return ctrl
@@ -714,7 +729,12 @@ def test_freshly_shed_device_reporting_on_is_not_a_user_override() -> None:
 def test_invalid_power_pauses_shedding_and_notifies_once() -> None:
     hass = FakeHass()
     hass.states.set("switch.a", "on")
-    coord = SimpleNamespace(async_request_refresh_ui=lambda: None, current_power=0.0)
+    coord = SimpleNamespace(
+        async_request_refresh_ui=lambda: None,
+        current_power=0.0,
+        power_sensor="sensor.p",
+        get_agreed_kw=lambda block: 7.0,
+    )
     ctrl = controller_mod.LoadShedController(
         hass, coord, "entry", ["switch.a"], ["notify.mobile_app_x"]
     )
@@ -836,6 +856,8 @@ def test_shed_cooldown_covers_the_smoothing_window() -> None:
         async_request_refresh_ui=lambda: None,
         current_power=0.0,
         smoothing_seconds=30.0,
+        power_sensor="sensor.p",
+        get_agreed_kw=lambda block: 7.0,
     )
     ctrl = controller_mod.LoadShedController(
         hass, coord, "entry", ["switch.a", "switch.b"], []
@@ -1058,3 +1080,86 @@ def test_window_is_created_on_first_use() -> None:
 def test_notify_target_given_as_a_single_string() -> None:
     cfg = {const.CONF_NOTIFY: "notify.mobile_app_a"}
     assert notify_helpers.notify_targets(cfg) == ["notify.mobile_app_a"]
+
+
+# --- repair issues -----------------------------------------------------------
+
+
+def test_long_power_outage_opens_a_repair_issue_that_closes_again() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass)
+    bad = _snap(power_valid=False)
+
+    _run(ctrl, bad, at(0))
+    _run(ctrl, bad, at(5))
+    assert hass.issues == {}  # not long enough yet
+
+    _run(ctrl, bad, at(11))
+    assert hass.issues["power_sensor_unavailable_entry"]["translation_placeholders"] == {
+        "entity_id": "sensor.p"
+    }
+    assert hass.issues["power_sensor_unavailable_entry"]["is_fixable"] is False
+
+    _run(ctrl, _snap(projected_average=0.0), at(12))
+    assert hass.issues == {}
+
+
+def test_missing_agreed_power_opens_one_issue_naming_the_blocks() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass)
+    ctrl.coordinator.agreed = {1: 0.0, 2: 0.0}
+
+    _run(ctrl, _snap(projected_average=0.0), at(0))
+    issue = hass.issues["agreed_power_not_set_entry"]
+    assert issue["translation_placeholders"] == {"blocks": "T1, T2"}
+
+    ctrl.coordinator.agreed = {1: 7.0, 2: 0.0}
+    _run(ctrl, _snap(projected_average=0.0), at(1))
+    assert hass.issues["agreed_power_not_set_entry"]["translation_placeholders"] == {
+        "blocks": "T2"
+    }
+
+    ctrl.coordinator.agreed = {1: 7.0, 2: 9.0}
+    _run(ctrl, _snap(projected_average=0.0), at(2))
+    assert hass.issues == {}
+
+
+def test_no_agreed_power_issue_without_devices_or_when_shedding_is_off() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass, devices=())
+    ctrl.coordinator.agreed = {1: 0.0, 2: 0.0}
+    _run(ctrl, _snap(projected_average=0.0), at(0))
+    assert hass.issues == {}
+
+    ctrl = _controller(hass)
+    ctrl.coordinator.agreed = {1: 0.0, 2: 0.0}
+    _run(ctrl, _snap(projected_average=0.0), at(1))
+    assert "agreed_power_not_set_entry" in hass.issues
+
+    ctrl.enabled = False  # turning load shedding off closes the issue
+    _run(ctrl, _snap(projected_average=0.0), at(2))
+    assert hass.issues == {}
+
+
+def test_issues_are_not_recreated_while_nothing_changes() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass)
+    ctrl.coordinator.agreed = {1: 0.0, 2: 0.0}
+    _run(ctrl, _snap(projected_average=0.0), at(0))
+    hass.issues["agreed_power_not_set_entry"]["marker"] = True
+
+    _run(ctrl, _snap(projected_average=0.0), at(1))
+
+    assert hass.issues["agreed_power_not_set_entry"]["marker"] is True
+
+
+def test_clear_issues_closes_everything() -> None:
+    hass = FakeHass()
+    ctrl = _controller(hass)
+    ctrl.coordinator.agreed = {1: 0.0, 2: 0.0}
+    _run(ctrl, _snap(projected_average=0.0), at(0))
+    assert hass.issues
+
+    ctrl.clear_issues()
+
+    assert hass.issues == {}

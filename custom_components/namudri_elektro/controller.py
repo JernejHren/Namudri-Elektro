@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -17,9 +18,13 @@ from .const import (
     DEFAULT_MIN_OFF_MINUTES,
     DEFAULT_STABILIZATION_SECONDS,
     DEFAULT_THRESHOLD_W,
+    DOMAIN,
+    ISSUE_AGREED_POWER,
+    ISSUE_POWER_SENSOR,
     LEARN_DELAY_SECONDS,
     LEARN_MAX_AGE_SECONDS,
     POWER_ALERT_AFTER_SECONDS,
+    POWER_ISSUE_AFTER_SECONDS,
     RESTORE_STAGGER_SECONDS,
     SHED_ACTION_COOLDOWN_SECONDS,
     SHED_RECORD_GRACE_SECONDS,
@@ -31,6 +36,8 @@ from .const import (
 )
 
 if TYPE_CHECKING:
+    from homeassistant.core import State
+
     from .coordinator import NamudriCoordinator, WindowSnapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,7 +76,9 @@ class LoadShedController:
         self._action_cooldown: float = float(SHED_ACTION_COOLDOWN_SECONDS)
         self._power_invalid_since: datetime | None = None
         self._power_alert_sent = False
-        self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
+        # repair issue key -> translation placeholders of the issue that is open
+        self._issues: dict[str, dict[str, str]] = {}
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
 
     @property
     def shed_entity_ids(self) -> list[str]:
@@ -176,9 +185,11 @@ class LoadShedController:
         await self._prune_user_overrides()
 
         if not self.enabled:
+            self._sync_issues()
             return
 
         await self._check_power_health(snapshot)
+        self._sync_issues()
         await self._learn_device_power(snapshot)
 
         if self._in_cooldown():
@@ -246,6 +257,56 @@ class LoadShedController:
                 limit,
                 budget_w=limit - self.hysteresis_w - projected,
             )
+
+    def _set_issue(self, key: str, placeholders: dict[str, str] | None) -> None:
+        """Open, update or close one repair issue; only touches the registry on change."""
+        if placeholders is None:
+            if self._issues.pop(key, None) is not None:
+                ir.async_delete_issue(self.hass, DOMAIN, f"{key}_{self.entry_id}")
+            return
+        if self._issues.get(key) == placeholders:
+            return
+        self._issues[key] = placeholders
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"{key}_{self.entry_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=key,
+            translation_placeholders=placeholders,
+        )
+
+    def _sync_issues(self) -> None:
+        """Repair issues the user can act on (nothing is raised while shedding is off)."""
+        power_down = (
+            self.enabled
+            and self._power_invalid_since is not None
+            and (dt_util.now() - self._power_invalid_since).total_seconds()
+            >= POWER_ISSUE_AFTER_SECONDS
+        )
+        self._set_issue(
+            ISSUE_POWER_SENSOR,
+            {"entity_id": self.coordinator.power_sensor} if power_down else None,
+        )
+        missing = (
+            [
+                f"T{block}"
+                for block in sorted(SHED_TARIFF_BLOCKS)
+                if self.coordinator.get_agreed_kw(block) <= 0
+            ]
+            if self.enabled and self.devices
+            else []
+        )
+        self._set_issue(
+            ISSUE_AGREED_POWER,
+            {"blocks": ", ".join(missing)} if missing else None,
+        )
+
+    def clear_issues(self) -> None:
+        """Close every repair issue (the entry is being unloaded)."""
+        for key in list(self._issues):
+            self._set_issue(key, None)
 
     def _in_cooldown(self) -> bool:
         if self._last_action is None:
@@ -523,7 +584,7 @@ class LoadShedController:
         return state not in ("off", "unknown", "unavailable")
 
     @staticmethod
-    def _capture_previous(entity_id: str, state) -> dict[str, Any]:
+    def _capture_previous(entity_id: str, state: State) -> dict[str, Any]:
         domain = entity_id.split(".", 1)[0]
         previous: dict[str, Any] = {"domain": domain, "state": state.state}
         if domain == "climate":

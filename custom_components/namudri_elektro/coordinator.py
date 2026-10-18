@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -30,6 +31,9 @@ from .const import (
 from .controller import LoadShedController
 from .notify_helpers import notify_targets
 from .window import project_average, window_start_for
+
+if TYPE_CHECKING:
+    from homeassistant.core import Event, EventStateChangedData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,8 +100,8 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         self._last_sample_time: datetime | None = None
         self._last_power: float = 0.0
         self._completed_average: float | None = None
-        self._unsub_state = None
-        self._unsub_interval = None
+        self._unsub_state: Callable[[], None] | None = None
+        self._unsub_interval: Callable[[], None] | None = None
         # Shed evaluation stays off until number/switch entities restored their
         # values (see async_mark_ready), so defaults never trigger an action.
         self._ready: bool = False
@@ -205,7 +209,7 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             self._unsub_interval = None
 
     @callback
-    def _handle_state_change(self, _event) -> None:
+    def _handle_state_change(self, _event: Event[EventStateChangedData]) -> None:
         """React to power or tariff changes."""
         self._ingest_power(dt_util.now())
         self._publish()

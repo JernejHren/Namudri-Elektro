@@ -26,6 +26,20 @@
           "devices": "Switches, climate or water heater entities that may be turned off. The first one in the list is shed first.",
           "notify_services": "Notify services that get a message on every shed and restore. Leave empty for no notifications."
         }
+      },
+      "reconfigure": {
+        "title": "Namudri Elektro — change sensors",
+        "description": "Change the name or the two source sensors. Devices, notifications and all numbers are kept.",
+        "data": {
+          "name": "Name",
+          "power_sensor": "Power sensor (W)",
+          "tariff_sensor": "Tariff block sensor"
+        },
+        "data_description": {
+          "name": "Name of the device that groups all Namudri entities.",
+          "power_sensor": "Import power of the whole house in W (export counts as 0 W).",
+          "tariff_sensor": "Sensor with the current network tariff block (1–5), e.g. from Elektro Network Tariff."
+        }
       }
     },
     "error": {
@@ -33,7 +47,8 @@
       "same_sensor": "The power sensor and the tariff sensor must be different."
     },
     "abort": {
-      "already_configured": "This combination of sensors is already configured."
+      "already_configured": "This combination of sensors is already configured.",
+      "reconfigure_successful": "The sensors were changed."
     }
   },
   "options": {
@@ -182,6 +197,16 @@
           "description": "Optional. If omitted, applies to all Namudri instances."
         }
       }
+    }
+  },
+  "issues": {
+    "power_sensor_unavailable": {
+      "title": "Power sensor not available",
+      "description": "The power sensor {entity_id} has been unavailable or has not been updating for more than 10 minutes, so no devices are shed. Check the sensor or pick another one in Settings → Devices & services → Namudri Elektro."
+    },
+    "agreed_power_not_set": {
+      "title": "Agreed power is not set",
+      "description": "Load shedding is on and devices are configured, but the agreed power of {blocks} is 0, so nothing is shed in that block. Set it on the Namudri Elektro device page or turn load shedding off."
     }
   }
 }
