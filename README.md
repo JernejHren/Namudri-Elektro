@@ -166,6 +166,8 @@ mypy --config-file mypy.ini custom_components/namudri_elektro
 
 The tests use [`pytest-homeassistant-custom-component`](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component) (a real Home Assistant), plus a few fast tests of the control logic against a small stub.
 
+The same checks run on GitHub for every pull request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): tests, `mypy --strict`, hassfest and the HACS validation, plus a weekly run to catch breakage from new Home Assistant releases.
+
 ### Quality scale
 
 The integration follows the [Home Assistant integration quality scale](https://contributors.home-assistant.io/core/quality-scale/); [`quality_scale.yaml`](custom_components/namudri_elektro/quality_scale.yaml) lists the status of every rule, and every rule of Bronze, Silver, Gold and Platinum is done or exempt with a reason. As a custom integration it has no official tier, so this is a self-assessment. `mypy --strict` passes on the whole component.
