@@ -56,7 +56,24 @@ def test_statuses_are_valid_and_exemptions_are_explained() -> None:
             assert isinstance(rule, dict) and rule.get("comment"), name
 
 
-def test_silver_is_complete_and_bronze_has_only_the_known_gap() -> None:
+def test_bronze_and_silver_are_complete() -> None:
     rules = _rules()
     assert {n for n in SILVER if _status(rules[n]) == "todo"} == set()
-    assert {n for n in BRONZE if _status(rules[n]) == "todo"} == {"brands"}
+    assert {n for n in BRONZE if _status(rules[n]) == "todo"} == set()
+
+
+def test_brand_images_are_shipped_with_the_right_sizes() -> None:
+    from PIL import Image
+
+    brand = FILE.parent / "brand"
+    icon_sizes = {"": 256, "@2x": 512}
+    logo_short_side = {"": (128, 256), "@2x": (256, 512)}
+    for prefix in ("", "dark_"):
+        for suffix, size in icon_sizes.items():
+            image = Image.open(brand / f"{prefix}icon{suffix}.png")
+            assert image.size == (size, size)
+            assert image.mode == "RGBA"
+        for suffix, (low, high) in logo_short_side.items():
+            image = Image.open(brand / f"{prefix}logo{suffix}.png")
+            assert low <= min(image.size) <= high
+            assert image.mode == "RGBA"

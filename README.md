@@ -158,7 +158,11 @@ The tests use [`pytest-homeassistant-custom-component`](https://github.com/Matth
 
 ### Quality scale
 
-The integration follows the [Home Assistant integration quality scale](https://contributors.home-assistant.io/core/quality-scale/); [`quality_scale.yaml`](custom_components/namudri_elektro/quality_scale.yaml) lists the status of every rule. Bronze and Silver are met except the *brands* rule; from Gold what is cheap is done, `reconfiguration-flow` and `repair-issues` (Gold) and `strict-typing` (Platinum) are not. As a custom integration it has no official tier.
+The integration follows the [Home Assistant integration quality scale](https://contributors.home-assistant.io/core/quality-scale/); [`quality_scale.yaml`](custom_components/namudri_elektro/quality_scale.yaml) lists the status of every rule. Bronze and Silver are met; from Gold what is cheap is done, `reconfiguration-flow` and `repair-issues` (Gold) and `strict-typing` (Platinum) are not. As a custom integration it has no official tier.
+
+### Brand images
+
+The icon and logo (light and dark, 1x and 2x) are in [`custom_components/namudri_elektro/brand`](custom_components/namudri_elektro/brand); Home Assistant **2026.3** and newer uses them directly. The SVG sources and the render script are in [`assets/brand`](assets/brand) (`python assets/brand/render.py`, needs Playwright with Chromium). Older versions would need the images in the [home-assistant/brands](https://github.com/home-assistant/brands) repository.
 
 ## License
 

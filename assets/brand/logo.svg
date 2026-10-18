@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 192" width="760" height="192">
+  <g transform="translate(0,0) scale(0.75)">
+  <path d="M 62.95 193.05 A 92 92 0 1 1 193.05 193.05" fill="none" stroke="#cbd5e1" stroke-width="24" stroke-linecap="round"/>
+  <path d="M 62.95 193.05 A 92 92 0 0 1 186.52 57.01" fill="none" stroke="#0d9488" stroke-width="24" stroke-linecap="round"/>
+  <line x1="199.1" y1="116.7" x2="238.6" y2="110.5" stroke="#ef4444" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 142 76 L 98 136 H 123 L 112 182 L 160 118 H 134 Z" fill="#f59e0b" stroke="#f59e0b" stroke-width="6" stroke-linejoin="round"/>
+</g>
+  <text x="200" y="88" font-family="Inter, 'DejaVu Sans', sans-serif" font-size="68" font-weight="700" fill="#0f172a">Namudri</text>
+  <text x="200" y="158" font-family="Inter, 'DejaVu Sans', sans-serif" font-size="68" font-weight="300" fill="#0f172a">Elektro</text>
+</svg>

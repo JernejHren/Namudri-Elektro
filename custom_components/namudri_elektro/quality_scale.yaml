@@ -1,7 +1,7 @@
 # Self-assessment against the Home Assistant integration quality scale
 # https://contributors.home-assistant.io/core/quality-scale/
 # As a custom integration this has no official tier; Bronze and Silver are met
-# except "brands", the Gold rules that were cheap to do are done.
+# and the Gold rules that were cheap to do are done.
 rules:
   # --- Bronze ---
   action-setup: done
@@ -9,8 +9,8 @@ rules:
     status: done
     comment: Nothing is polled; the coordinator follows the source sensors and a local 5 s timer.
   brands:
-    status: todo
-    comment: No brand assets published yet.
+    status: done
+    comment: Icon and logo (light and dark, 1x and 2x) are shipped in the brand/ folder, supported from Home Assistant 2026.3.
   common-modules: done
   config-flow: done
   config-flow-test-coverage: done
