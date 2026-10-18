@@ -443,3 +443,25 @@ async def test_diagnostics_includes_shed_devices(
     assert dt_util.parse_datetime(
         diagnostics["controller"]["shed"]["switch.boiler"]["off_since"]
     )
+
+
+async def test_repair_issue_is_raised_for_missing_agreed_power_and_cleared_on_unload(
+    hass: HomeAssistant, init_integration: MockConfigEntry
+) -> None:
+    from homeassistant.helpers import issue_registry as ir
+
+    controller = init_integration.runtime_data.controller
+    controller.devices = ["switch.boiler"]
+    issue_id = f"agreed_power_not_set_{init_integration.entry_id}"
+
+    await controller.async_evaluate(init_integration.runtime_data._compute())
+
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.translation_key == "agreed_power_not_set"
+    assert issue.translation_placeholders == {"blocks": "T1, T2"}
+    assert issue.is_fixable is False
+
+    await hass.config_entries.async_unload(init_integration.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None

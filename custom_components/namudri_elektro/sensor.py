@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -54,7 +56,7 @@ class NamudriSensorDescription(SensorEntityDescription):
     """Sensor description with value extractor."""
 
     value_fn: Callable[[WindowSnapshot], float | int | None]
-    attrs_fn: Callable[[WindowSnapshot], dict] | None = None
+    attrs_fn: Callable[[WindowSnapshot], dict[str, Any]] | None = None
     # False -> the entity is shown as unavailable (its source sensor is gone);
     # a value of None with available=True is shown as unknown
     available_fn: Callable[[WindowSnapshot], bool] = _power_ok
@@ -191,7 +193,7 @@ class NamudriSensor(NamudriCoordinatorEntity, SensorEntity):
         return self.entity_description.value_fn(self.coordinator.data)
 
     @property
-    def extra_state_attributes(self) -> dict | None:
+    def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return attributes."""
         if self.entity_description.attrs_fn is None:
             return None

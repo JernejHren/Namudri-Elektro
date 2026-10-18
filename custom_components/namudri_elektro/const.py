@@ -61,6 +61,10 @@ LEARN_DELAY_SECONDS = 15
 LEARN_MAX_AGE_SECONDS = 120
 # Notify when the power sensor has been unusable for this long
 POWER_ALERT_AFTER_SECONDS = 60
+# A power sensor that stays unusable this long becomes a repair issue.
+POWER_ISSUE_AFTER_SECONDS = 600
+ISSUE_POWER_SENSOR = "power_sensor_unavailable"
+ISSUE_AGREED_POWER = "agreed_power_not_set"
 
 ATTR_WINDOW_START = "window_start"
 ATTR_ELAPSED_SECONDS = "elapsed_seconds"

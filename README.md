@@ -35,7 +35,7 @@ Copy `custom_components/namudri_elektro` into your Home Assistant `custom_compon
 
 1. **Settings → Devices & services → Add integration → Namudri Elektro.**
 2. Pick the power sensor and the tariff block sensor.
-3. Optionally pick the devices to shed, in priority order (first = shed first), and the phones to notify on every shed/restore. Notification targets are chosen from a list of the notify services registered in your Home Assistant (mobile apps first, e.g. `notify.mobile_app_phone`). Leave empty for monitoring only. This can be changed later via **Configure**.
+3. Optionally pick the devices to shed, in priority order (first = shed first), and the phones to notify on every shed/restore. Notification targets are chosen from a list of the notify services registered in your Home Assistant (mobile apps first, e.g. `notify.mobile_app_phone`). Leave empty for monitoring only. This can be changed later via **Configure**; the name and the two source sensors can also be changed with **⋮ → Reconfigure** on the integration entry.
 4. Set the agreed power **T1–T5 in kW**. The default is **0 = not set**: until you set a block, its headroom and over-limit are unknown and nothing is shed in that block.
 5. Adjust the shed tuning numbers if needed and switch **Load shedding** on.
 
@@ -115,6 +115,15 @@ Entities become **unavailable** while the sensor they depend on is unavailable (
 
 The data is **not polled**: the integration listens to the two source sensors and recalculates every 5 s, all locally.
 
+## Repairs
+
+Two situations are shown under **Settings → System → Repairs** and disappear by themselves when fixed:
+
+- **Power sensor not available**: the power sensor has been unavailable or stale for more than 10 minutes (nothing is shed meanwhile).
+- **Agreed power is not set**: load shedding is on and devices are chosen, but T1 and/or T2 is 0, so nothing can be shed in that block.
+
+Neither is raised while **Load shedding** is off.
+
 ## Use cases
 
 - Keep a household under the agreed power in the expensive blocks 1–2 by pausing a boiler, a heat pump or a car charger for a few minutes.
@@ -152,13 +161,14 @@ A ready-to-use example (entities card, gauge and an alert) is in [`examples/love
 python3 -m venv venv && . venv/bin/activate
 pip install -r requirements_test.txt
 pytest --cov=custom_components.namudri_elektro
+mypy --config-file mypy.ini custom_components/namudri_elektro
 ```
 
 The tests use [`pytest-homeassistant-custom-component`](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component) (a real Home Assistant), plus a few fast tests of the control logic against a small stub.
 
 ### Quality scale
 
-The integration follows the [Home Assistant integration quality scale](https://contributors.home-assistant.io/core/quality-scale/); [`quality_scale.yaml`](custom_components/namudri_elektro/quality_scale.yaml) lists the status of every rule. Bronze and Silver are met; from Gold what is cheap is done, `reconfiguration-flow` and `repair-issues` (Gold) and `strict-typing` (Platinum) are not. As a custom integration it has no official tier.
+The integration follows the [Home Assistant integration quality scale](https://contributors.home-assistant.io/core/quality-scale/); [`quality_scale.yaml`](custom_components/namudri_elektro/quality_scale.yaml) lists the status of every rule, and every rule of Bronze, Silver, Gold and Platinum is done or exempt with a reason. As a custom integration it has no official tier, so this is a self-assessment. `mypy --strict` passes on the whole component.
 
 ### Brand images
 

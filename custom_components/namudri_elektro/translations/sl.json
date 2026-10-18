@@ -26,6 +26,20 @@
           "devices": "Stikala, klime ali bojlerji, ki jih je dovoljeno izklopiti. Prva na seznamu se izklopi prva.",
           "notify_services": "Notify storitve, ki dobijo sporočilo ob vsakem izklopu in vklopu. Prazno = brez obvestil."
         }
+      },
+      "reconfigure": {
+        "title": "Namudri Elektro — zamenjava senzorjev",
+        "description": "Spremeni ime ali oba izvorna senzorja. Naprave, obvestila in vse nastavitve ostanejo.",
+        "data": {
+          "name": "Ime",
+          "power_sensor": "Senzor moči (W)",
+          "tariff_sensor": "Senzor tarifnega bloka"
+        },
+        "data_description": {
+          "name": "Ime naprave, ki združuje vse entitete Namudri.",
+          "power_sensor": "Uvozna moč celotne hiše v W (izvoz se šteje kot 0 W).",
+          "tariff_sensor": "Senzor s trenutnim tarifnim blokom omrežnine (1–5), npr. iz Elektro Network Tariff."
+        }
       }
     },
     "error": {
@@ -33,7 +47,8 @@
       "same_sensor": "Senzor moči in senzor tarife morata biti različna."
     },
     "abort": {
-      "already_configured": "Ta kombinacija senzorjev je že nastavljena."
+      "already_configured": "Ta kombinacija senzorjev je že nastavljena.",
+      "reconfigure_successful": "Senzorji so spremenjeni."
     }
   },
   "options": {
@@ -182,6 +197,16 @@
           "description": "Neobvezno. Če ni podan, velja za vse instance Namudri."
         }
       }
+    }
+  },
+  "issues": {
+    "power_sensor_unavailable": {
+      "title": "Senzor moči ni na voljo",
+      "description": "Senzor moči {entity_id} več kot 10 minut ni na voljo ali se ne osvežuje, zato se nobena naprava ne izklaplja. Preveri senzor ali izberi drugega v Nastavitve → Naprave in storitve → Namudri Elektro."
+    },
+    "agreed_power_not_set": {
+      "title": "Dogovorjena moč ni nastavljena",
+      "description": "Izklapljanje je vklopljeno in naprave so izbrane, vendar je dogovorjena moč za {blocks} enaka 0, zato se v tem bloku nič ne izklaplja. Nastavi jo na strani naprave Namudri Elektro ali izklopi izklapljanje."
     }
   }
 }

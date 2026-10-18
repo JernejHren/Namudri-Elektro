@@ -60,5 +60,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: NamudriConfigEntry) -> 
         entry, [Platform(p) for p in PLATFORMS]
     )
     if unload_ok:
+        entry.runtime_data.controller.clear_issues()
         entry.runtime_data.async_stop()
     return unload_ok

@@ -56,10 +56,10 @@ def test_statuses_are_valid_and_exemptions_are_explained() -> None:
             assert isinstance(rule, dict) and rule.get("comment"), name
 
 
-def test_bronze_and_silver_are_complete() -> None:
+def test_every_tier_is_complete() -> None:
     rules = _rules()
-    assert {n for n in SILVER if _status(rules[n]) == "todo"} == set()
-    assert {n for n in BRONZE if _status(rules[n]) == "todo"} == set()
+    open_rules = {n for n in BRONZE | SILVER | GOLD | PLATINUM if _status(rules[n]) == "todo"}
+    assert open_rules == set()
 
 
 def test_brand_images_are_shipped_with_the_right_sizes() -> None:

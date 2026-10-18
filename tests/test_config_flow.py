@@ -210,3 +210,79 @@ async def test_options_flow_keeps_legacy_notify_target(hass: HomeAssistant) -> N
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_NOTIFY] == ["notify.mobile_app_old_phone"]
     assert CONF_NOTIFY_1 not in entry.options
+
+
+async def test_reconfigure_changes_sensors_and_keeps_everything_else(
+    hass: HomeAssistant, mock_entry: MockConfigEntry
+) -> None:
+    set_sources(hass)
+    hass.states.async_set("sensor.other_power", "10", {"device_class": "power"})
+    mock_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        mock_entry,
+        options={CONF_POWER_SENSOR: POWER, CONF_DEVICES: ["switch.boiler"]},
+    )
+
+    with patch(f"custom_components.{DOMAIN}.async_setup_entry", return_value=True):
+        result = await mock_entry.start_reconfigure_flow(hass)
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "reconfigure"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Renamed",
+                CONF_POWER_SENSOR: "sensor.other_power",
+                CONF_TARIFF_SENSOR: TARIFF,
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_entry.data[CONF_POWER_SENSOR] == "sensor.other_power"
+    assert mock_entry.options[CONF_POWER_SENSOR] == "sensor.other_power"
+    assert mock_entry.options[CONF_DEVICES] == ["switch.boiler"]  # untouched
+    assert mock_entry.title == "Renamed"
+    assert mock_entry.unique_id == f"sensor.other_power_{TARIFF}"
+
+
+async def test_reconfigure_shows_errors_and_can_be_corrected(
+    hass: HomeAssistant, mock_entry: MockConfigEntry
+) -> None:
+    set_sources(hass)
+    mock_entry.add_to_hass(hass)
+
+    with patch(f"custom_components.{DOMAIN}.async_setup_entry", return_value=True):
+        result = await mock_entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**SENSORS, CONF_POWER_SENSOR: "sensor.missing"}
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {CONF_POWER_SENSOR: "sensor_not_found"}
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], SENSORS
+        )
+        assert result["reason"] == "reconfigure_successful"
+
+
+async def test_reconfigure_cannot_duplicate_another_entry(
+    hass: HomeAssistant, mock_entry: MockConfigEntry
+) -> None:
+    set_sources(hass)
+    hass.states.async_set("sensor.other_power", "10", {"device_class": "power"})
+    mock_entry.add_to_hass(hass)
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"sensor.other_power_{TARIFF}",
+        data={**SENSORS, CONF_POWER_SENSOR: "sensor.other_power"},
+    ).add_to_hass(hass)
+
+    with patch(f"custom_components.{DOMAIN}.async_setup_entry", return_value=True):
+        result = await mock_entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**SENSORS, CONF_POWER_SENSOR: "sensor.other_power"}
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"

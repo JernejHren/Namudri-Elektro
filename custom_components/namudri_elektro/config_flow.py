@@ -7,8 +7,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
@@ -137,7 +137,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Initial setup step (sensors)."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -158,7 +158,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_shedding(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Optional load-shedding devices (can also be set later in options)."""
         if user_input is not None:
             data = _normalize_shedding({**self._sensors, **user_input})
@@ -170,6 +170,47 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="shedding",
             data_schema=_shedding_schema(self.hass),
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the name and the two source sensors without deleting the entry."""
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            unique_id = (
+                f"{user_input[CONF_POWER_SENSOR]}_{user_input[CONF_TARIFF_SENSOR]}"
+            )
+            errors = _validate_sensors(self.hass, user_input)
+            if not errors and any(
+                other.entry_id != entry.entry_id and other.unique_id == unique_id
+                for other in self._async_current_entries(include_ignore=False)
+            ):
+                return self.async_abort(reason="already_configured")
+            if not errors:
+                sensors = {
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_POWER_SENSOR: user_input[CONF_POWER_SENSOR],
+                    CONF_TARIFF_SENSOR: user_input[CONF_TARIFF_SENSOR],
+                }
+                # Options win over the setup data, so they must follow too.
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=unique_id,
+                    title=user_input[CONF_NAME],
+                    data={**entry.data, **sensors},
+                    options={
+                        **entry.options,
+                        **{k: v for k, v in sensors.items() if k in entry.options},
+                    },
+                )
+
+        defaults = user_input or {**entry.data, **entry.options}
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_sensor_schema(defaults),
+            errors=errors,
         )
 
     @staticmethod
@@ -190,7 +231,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Sensors step."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -208,7 +249,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_shedding(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Load shedding devices and notifications."""
         if user_input is not None:
             data = _normalize_shedding({**self._sensors, **user_input})

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -74,6 +76,6 @@ class SheddingActiveBinarySensor(NamudriCoordinatorEntity, BinarySensorEntity):
         return self.coordinator.data.shedding_active
 
     @property
-    def extra_state_attributes(self) -> dict | None:
+    def extra_state_attributes(self) -> dict[str, Any] | None:
         """List of currently auto-shed entities."""
         return {ATTR_SHED_DEVICES: self.coordinator.data.shed_devices}
