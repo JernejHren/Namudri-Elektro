@@ -25,6 +25,12 @@ Home Assistant **2024.11.0** or newer.
 
 Copy `custom_components/namudri_elektro` into your Home Assistant `custom_components` folder and restart.
 
+### Removal
+
+1. **Settings → Devices & services → Namudri Elektro → ⋮ → Delete.** Devices that were shed are **not** switched back on automatically when you delete the integration — use the **Load shedding** switch (off = restore everything) or `namudri_elektro.restore_all` first.
+2. HACS: remove the repository; manual install: delete `custom_components/namudri_elektro` and restart.
+3. Optional: delete `.storage/namudri_elektro.shed_state_<entry id>` (the saved shed list).
+
 ### Setup
 
 1. **Settings → Devices & services → Add integration → Namudri Elektro.**
@@ -82,7 +88,7 @@ Supported device domains: `switch`, `climate`, `water_heater`. The master switch
 
 ## Entities
 
-Entity IDs below assume the default device name *Namudri Elektro* (e.g. `sensor.namudri_elektro_headroom`).
+Entity IDs below assume the default device name *Namudri Elektro* and an English Home Assistant (e.g. `sensor.namudri_elektro_headroom`). Home Assistant derives entity IDs from the entity names in the language it runs in when the entity is first added, so a Slovenian installation gets Slovenian IDs; entities that already exist keep their ID.
 
 | Entity | Description |
 |--------|-------------|
@@ -91,12 +97,12 @@ Entity IDs below assume the default device name *Namudri Elektro* (e.g. `sensor.
 | `sensor.*_completed_15_min_average` | Last completed window (W) |
 | `sensor.*_agreed_power_current_block` | Agreed limit for the current block (W), unknown if not set |
 | `sensor.*_headroom` | Agreed power − projection (W), unknown if the limit is unknown |
-| `sensor.*_tariff_block` | Block 1–5 |
-| `sensor.*_shed_device_count` | How many devices are auto-shed |
+| `sensor.*_tariff_block` | Block 1–5 (diagnostic) |
+| `sensor.*_shed_device_count` | How many devices are auto-shed (diagnostic, **disabled by default**) |
 | `binary_sensor.*_over_agreed_power` | Projection above agreed power |
 | `binary_sensor.*_shedding_active` | Auto-shed list is not empty |
 | `switch.*_load_shedding` | Master enable |
-| `number.*_agreed_power_t1` … `t5` | Dogovorjena moč (**kW**) |
+| `number.*_agreed_power_t1` … `t5` | Dogovorjena moč (**kW**), configuration category |
 | `number.*_shed_threshold` | W above the limit before shedding |
 | `number.*_restore_hysteresis` | W below the limit before restoring |
 | `number.*_minimum_off_time` | Minutes a shed device stays off at least |
@@ -104,6 +110,32 @@ Entity IDs below assume the default device name *Namudri Elektro* (e.g. `sensor.
 | `number.*_projection_stabilization` | No shedding during the first N seconds of a window (default 300) |
 | `number.*_power_smoothing` | Seconds over which the power for the projection is averaged (0 = off) |
 | `number.*_sensor_timeout` | Seconds after which a power sensor state counts as stale (0 = no check) |
+
+Entities become **unavailable** while the sensor they depend on is unavailable (the projection, running average, headroom and over-limit need the power sensor; the tariff block, agreed power, headroom and over-limit need the tariff sensor). A limit that is simply not set is shown as *unknown*. Both sensors being gone is logged once, and again when they are back. The number entities and the switch are always available.
+
+The data is **not polled**: the integration listens to the two source sensors and recalculates every 5 s, all locally.
+
+## Use cases
+
+- Keep a household under the agreed power in the expensive blocks 1–2 by pausing a boiler, a heat pump or a car charger for a few minutes.
+- Show the remaining headroom and a warning before the 15-minute average exceeds the agreed power.
+- Check later whether the agreed power per block is set sensibly (compare with the completed windows).
+
+## Known limitations
+
+- The result can only be as accurate as the power sensor. Compare the 15-minute values with your meter data (distributor portal) — with three phases and solar production the sum of the phases is not always what the meter bills.
+- Only `switch`, `climate` and `water_heater` entities can be shed, and only in tariff blocks 1 and 2.
+- The power a device draws is measured from the drop of the total power 15–120 s after the shed; another load switching at the same time distorts the estimate.
+- If another automation switches a shed device back on, Namudri takes it off its list and does not shed it again until the projection exceeds the limit again.
+- The first 5 minutes of a window (configurable) never shed anything, and neither does a window that was started by a restart in its middle.
+- There is no re-authentication or discovery: nothing here needs a login and there are no devices to find.
+
+## Troubleshooting
+
+- **Entities unavailable**: check the power sensor (is it updating? the *Sensor timeout* is 120 s by default) and the tariff sensor (it must report 1–5). The log tells which of them is missing.
+- **Integration stays in "retrying"**: one of the two sensors does not exist (yet). Check the entity IDs under **Configure**.
+- **Nothing is shed**: is **Load shedding** on, is the agreed power of the current block set (not 0), are devices configured, is it block 1 or 2, and is the window complete (`window_complete` attribute)?
+- **Download diagnostics** (device page → ⋮) when reporting a problem; notification targets are redacted.
 
 ## Lovelace
 
@@ -117,11 +149,20 @@ A ready-to-use example (entities card, gauge and an alert) is in [`examples/love
 ## Development
 
 ```bash
-pip install pytest
-python -m pytest
+python3 -m venv venv && . venv/bin/activate
+pip install -r requirements_test.txt
+pytest --cov=custom_components.namudri_elektro
 ```
 
-The tests run without Home Assistant (a minimal stub is included).
+The tests use [`pytest-homeassistant-custom-component`](https://github.com/MatthewFlamm/pytest-homeassistant-custom-component) (a real Home Assistant), plus a few fast tests of the control logic against a small stub.
+
+### Quality scale
+
+The integration follows the [Home Assistant integration quality scale](https://contributors.home-assistant.io/core/quality-scale/); [`quality_scale.yaml`](custom_components/namudri_elektro/quality_scale.yaml) lists the status of every rule. Bronze and Silver are met; from Gold what is cheap is done, `reconfiguration-flow` and `repair-issues` (Gold) and `strict-typing` (Platinum) are not. As a custom integration it has no official tier.
+
+### Brand images
+
+The icon and logo (light and dark, 1x and 2x) are in [`custom_components/namudri_elektro/brand`](custom_components/namudri_elektro/brand); Home Assistant **2026.3** and newer uses them directly. The SVG sources and the render script are in [`assets/brand`](assets/brand) (`python assets/brand/render.py`, needs Playwright with Chromium). Older versions would need the images in the [home-assistant/brands](https://github.com/home-assistant/brands) repository.
 
 ## License
 

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -31,6 +32,8 @@ from .notify_helpers import notify_targets
 from .window import project_average, window_start_for
 
 _LOGGER = logging.getLogger(__name__)
+
+type NamudriConfigEntry = ConfigEntry[NamudriCoordinator]
 
 
 def _seconds_between(start: datetime, end: datetime) -> float:
@@ -71,11 +74,13 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         hass: HomeAssistant,
         entry_id: str,
         config: dict[str, Any],
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         """Initialize coordinator."""
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=config_entry,
             name=DOMAIN,
             update_interval=None,  # event + timer driven
         )
@@ -96,6 +101,9 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
         # Shed evaluation stays off until number/switch entities restored their
         # values (see async_mark_ready), so defaults never trigger an action.
         self._ready: bool = False
+        # Availability of the source sensors, to log only changes
+        self._power_was_valid: bool = True
+        self._tariff_was_valid: bool = True
         # Live tuning (number entities)
         self.power_timeout_seconds: float = DEFAULT_SENSOR_TIMEOUT_SECONDS
         self.smoothing_seconds: float = DEFAULT_SMOOTHING_SECONDS
@@ -112,6 +120,11 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
             return
         self._agreed_kw[block] = max(0.0, float(value_kw))
         self._publish()
+
+    @property
+    def agreed_kw(self) -> dict[int, float]:
+        """Agreed power per tariff block (kW)."""
+        return dict(self._agreed_kw)
 
     def get_agreed_kw(self, block: int) -> float:
         """Return agreed power in kW for block."""
@@ -207,9 +220,38 @@ class NamudriCoordinator(DataUpdateCoordinator[WindowSnapshot]):
     def _publish(self) -> None:
         """Update listeners and (once ready) schedule shed evaluation."""
         snapshot = self._compute()
+        self._log_source_availability(snapshot)
         self.async_set_updated_data(snapshot)
         if self._ready:
-            self.hass.async_create_task(self.controller.async_evaluate(snapshot))
+            coro = self.controller.async_evaluate(snapshot)
+            if self.config_entry is not None:
+                self.config_entry.async_create_background_task(
+                    self.hass, coro, f"{DOMAIN}_evaluate"
+                )
+            else:
+                self.hass.async_create_task(coro)
+
+    def _log_source_availability(self, snapshot: WindowSnapshot) -> None:
+        """Log once when a source sensor becomes unavailable and when it is back."""
+        tariff_valid = snapshot.tariff_block != 0
+        if self._power_was_valid and not snapshot.power_valid:
+            _LOGGER.warning(
+                "Power sensor %s is unavailable or its state is stale; "
+                "projection and load shedding are paused",
+                self.power_sensor,
+            )
+        elif not self._power_was_valid and snapshot.power_valid:
+            _LOGGER.info("Power sensor %s is back", self.power_sensor)
+        if self._tariff_was_valid and not tariff_valid:
+            _LOGGER.warning(
+                "Tariff sensor %s is unavailable or not a block 1-5; "
+                "load shedding is paused",
+                self.tariff_sensor,
+            )
+        elif not self._tariff_was_valid and tariff_valid:
+            _LOGGER.info("Tariff sensor %s is back", self.tariff_sensor)
+        self._power_was_valid = snapshot.power_valid
+        self._tariff_was_valid = tariff_valid
 
     def _read_power(self, *, warn: bool = True) -> float | None:
         """Read current import power in W (export clamped to 0).

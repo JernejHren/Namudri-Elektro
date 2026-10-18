@@ -11,12 +11,9 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower
+from homeassistant.const import EntityCategory, UnitOfPower
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_AGREED_POWER_W,
@@ -28,11 +25,28 @@ from .const import (
     ATTR_SHED_DEVICES,
     ATTR_TARIFF_BLOCK,
     ATTR_WINDOW_START,
-    CONF_NAME,
-    DOMAIN,
-    VERSION,
 )
-from .coordinator import NamudriCoordinator, WindowSnapshot
+from .coordinator import NamudriConfigEntry, NamudriCoordinator, WindowSnapshot
+from .entity import NamudriCoordinatorEntity
+
+# Coordinator-driven, nothing is polled: no limit on parallel updates
+PARALLEL_UPDATES = 0
+
+
+def _power_ok(data: WindowSnapshot) -> bool:
+    return data.power_valid
+
+
+def _tariff_ok(data: WindowSnapshot) -> bool:
+    return data.tariff_block != 0
+
+
+def _power_and_tariff_ok(data: WindowSnapshot) -> bool:
+    return data.power_valid and data.tariff_block != 0
+
+
+def _always(data: WindowSnapshot) -> bool:
+    return True
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -41,13 +55,15 @@ class NamudriSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[WindowSnapshot], float | int | None]
     attrs_fn: Callable[[WindowSnapshot], dict] | None = None
+    # False -> the entity is shown as unavailable (its source sensor is gone);
+    # a value of None with available=True is shown as unknown
+    available_fn: Callable[[WindowSnapshot], bool] = _power_ok
 
 
 SENSORS: tuple[NamudriSensorDescription, ...] = (
     NamudriSensorDescription(
         key="projected_power",
         translation_key="projected_power",
-        name="Projected 15 min power",
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -66,7 +82,6 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
     NamudriSensorDescription(
         key="running_average",
         translation_key="running_average",
-        name="Running 15 min average",
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -82,7 +97,7 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
     NamudriSensorDescription(
         key="completed_window",
         translation_key="completed_window",
-        name="Completed 15 min average",
+        available_fn=_always,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -92,25 +107,23 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
     NamudriSensorDescription(
         key="agreed_power",
         translation_key="agreed_power",
-        name="Agreed power (current block)",
+        available_fn=_tariff_ok,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
         suggested_display_precision=0,
-        value_fn=lambda d: (
-            d.agreed_power_w if d.tariff_block and d.agreed_power_w > 0 else None
-        ),
+        value_fn=lambda d: d.agreed_power_w if d.agreed_power_w > 0 else None,
         attrs_fn=lambda d: {ATTR_TARIFF_BLOCK: d.tariff_block},
     ),
     NamudriSensorDescription(
         key="headroom",
         translation_key="headroom",
-        name="Headroom",
+        available_fn=_power_and_tariff_ok,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
         suggested_display_precision=0,
-        value_fn=lambda d: d.headroom_w if d.tariff_block else None,
+        value_fn=lambda d: d.headroom_w,
         attrs_fn=lambda d: {
             ATTR_TARIFF_BLOCK: d.tariff_block,
             ATTR_AGREED_POWER_W: d.agreed_power_w,
@@ -120,14 +133,17 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
     NamudriSensorDescription(
         key="tariff_block",
         translation_key="tariff_block",
-        name="Tariff block",
+        available_fn=_tariff_ok,
+        entity_category=EntityCategory.DIAGNOSTIC,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d.tariff_block or None,
     ),
     NamudriSensorDescription(
         key="shed_device_count",
         translation_key="shed_device_count",
-        name="Shed device count",
+        available_fn=_always,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: len(d.shed_devices),
         attrs_fn=lambda d: {ATTR_SHED_DEVICES: d.shed_devices},
@@ -137,52 +153,46 @@ SENSORS: tuple[NamudriSensorDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: NamudriConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensors."""
-    coordinator: NamudriCoordinator = hass.data[DOMAIN][entry.entry_id]
-    name = entry.data.get(CONF_NAME, "Namudri Elektro")
+    coordinator = entry.runtime_data
     async_add_entities(
-        NamudriSensor(coordinator, entry, name, description) for description in SENSORS
+        NamudriSensor(coordinator, entry, description) for description in SENSORS
     )
 
 
-class NamudriSensor(CoordinatorEntity[NamudriCoordinator], SensorEntity):
+class NamudriSensor(NamudriCoordinatorEntity, SensorEntity):
     """Namudri monitoring sensor."""
 
     entity_description: NamudriSensorDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
         coordinator: NamudriCoordinator,
-        entry: ConfigEntry,
-        device_name: str,
+        entry: NamudriConfigEntry,
         description: NamudriSensorDescription,
     ) -> None:
         """Initialize sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry, description.key)
         self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=device_name,
-            manufacturer="Namudri",
-            model="Elektro",
-            sw_version=VERSION,
+
+    @property
+    def available(self) -> bool:
+        """Unavailable while the source sensor it depends on is unavailable."""
+        return super().available and self.entity_description.available_fn(
+            self.coordinator.data
         )
 
     @property
     def native_value(self) -> float | int | None:
         """Return sensor value."""
-        if self.coordinator.data is None:
-            return None
         return self.entity_description.value_fn(self.coordinator.data)
 
     @property
     def extra_state_attributes(self) -> dict | None:
         """Return attributes."""
-        if self.coordinator.data is None or self.entity_description.attrs_fn is None:
+        if self.entity_description.attrs_fn is None:
             return None
         return self.entity_description.attrs_fn(self.coordinator.data)

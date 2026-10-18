@@ -8,6 +8,11 @@
           "name": "Name",
           "power_sensor": "Power sensor (W)",
           "tariff_sensor": "Tariff block sensor"
+        },
+        "data_description": {
+          "name": "Name of the device that groups all Namudri entities.",
+          "power_sensor": "Import power of the whole house in W (export counts as 0 W).",
+          "tariff_sensor": "Sensor with the current network tariff block (1–5), e.g. from Elektro Network Tariff."
         }
       },
       "shedding": {
@@ -16,8 +21,16 @@
         "data": {
           "devices": "Devices (priority order)",
           "notify_services": "Notifications (pick your phones)"
+        },
+        "data_description": {
+          "devices": "Switches, climate or water heater entities that may be turned off. The first one in the list is shed first.",
+          "notify_services": "Notify services that get a message on every shed and restore. Leave empty for no notifications."
         }
       }
+    },
+    "error": {
+      "sensor_not_found": "This entity does not exist.",
+      "same_sensor": "The power sensor and the tariff sensor must be different."
     },
     "abort": {
       "already_configured": "This combination of sensors is already configured."
@@ -31,6 +44,11 @@
           "name": "Name",
           "power_sensor": "Power sensor (W)",
           "tariff_sensor": "Tariff block sensor"
+        },
+        "data_description": {
+          "name": "Name of the device that groups all Namudri entities.",
+          "power_sensor": "Import power of the whole house in W (export counts as 0 W).",
+          "tariff_sensor": "Sensor with the current network tariff block (1–5), e.g. from Elektro Network Tariff."
         }
       },
       "shedding": {
@@ -39,40 +57,131 @@
         "data": {
           "devices": "Devices (priority order)",
           "notify_services": "Notifications (pick your phones)"
+        },
+        "data_description": {
+          "devices": "Switches, climate or water heater entities that may be turned off. The first one in the list is shed first.",
+          "notify_services": "Notify services that get a message on every shed and restore. Leave empty for no notifications."
         }
       }
+    },
+    "error": {
+      "sensor_not_found": "This entity does not exist.",
+      "same_sensor": "The power sensor and the tariff sensor must be different."
     }
   },
   "entity": {
     "sensor": {
-      "projected_power": { "name": "Projected 15 min power" },
-      "running_average": { "name": "Running 15 min average" },
-      "completed_window": { "name": "Completed 15 min average" },
-      "agreed_power": { "name": "Agreed power (current block)" },
-      "headroom": { "name": "Headroom" },
-      "tariff_block": { "name": "Tariff block" },
-      "shed_device_count": { "name": "Shed device count" }
+      "projected_power": {
+        "name": "Projected 15 min power"
+      },
+      "running_average": {
+        "name": "Running 15 min average"
+      },
+      "completed_window": {
+        "name": "Completed 15 min average"
+      },
+      "agreed_power": {
+        "name": "Agreed power (current block)"
+      },
+      "headroom": {
+        "name": "Headroom"
+      },
+      "tariff_block": {
+        "name": "Tariff block"
+      },
+      "shed_device_count": {
+        "name": "Shed device count"
+      }
     },
     "binary_sensor": {
-      "over_agreed_power": { "name": "Over agreed power" },
-      "shedding_active": { "name": "Shedding active" }
+      "over_agreed_power": {
+        "name": "Over agreed power"
+      },
+      "shedding_active": {
+        "name": "Shedding active"
+      }
     },
     "switch": {
-      "load_shedding": { "name": "Load shedding" }
+      "load_shedding": {
+        "name": "Load shedding"
+      }
     },
     "number": {
-      "agreed_power_t1": { "name": "Agreed power T1" },
-      "agreed_power_t2": { "name": "Agreed power T2" },
-      "agreed_power_t3": { "name": "Agreed power T3" },
-      "agreed_power_t4": { "name": "Agreed power T4" },
-      "agreed_power_t5": { "name": "Agreed power T5" },
-      "shed_threshold": { "name": "Shed threshold" },
-      "shed_hysteresis": { "name": "Restore hysteresis" },
-      "min_off_minutes": { "name": "Minimum off time" },
-      "stabilization_seconds": { "name": "Projection stabilization" },
-      "max_off_minutes": { "name": "Maximum off time" },
-      "power_smoothing": { "name": "Power smoothing" },
-      "sensor_timeout": { "name": "Sensor timeout" }
+      "agreed_power_t1": {
+        "name": "Agreed power T1"
+      },
+      "agreed_power_t2": {
+        "name": "Agreed power T2"
+      },
+      "agreed_power_t3": {
+        "name": "Agreed power T3"
+      },
+      "agreed_power_t4": {
+        "name": "Agreed power T4"
+      },
+      "agreed_power_t5": {
+        "name": "Agreed power T5"
+      },
+      "shed_threshold": {
+        "name": "Shed threshold"
+      },
+      "shed_hysteresis": {
+        "name": "Restore hysteresis"
+      },
+      "min_off_minutes": {
+        "name": "Minimum off time"
+      },
+      "stabilization_seconds": {
+        "name": "Projection stabilization"
+      },
+      "max_off_minutes": {
+        "name": "Maximum off time"
+      },
+      "power_smoothing": {
+        "name": "Power smoothing"
+      },
+      "sensor_timeout": {
+        "name": "Sensor timeout"
+      }
+    }
+  },
+  "exceptions": {
+    "source_entity_not_found": {
+      "message": "Source entity {entity_id} was not found (yet). Home Assistant will retry."
+    },
+    "entry_not_found": {
+      "message": "No loaded Namudri Elektro entry with ID {entry_id}."
+    },
+    "no_loaded_entry": {
+      "message": "Namudri Elektro is not set up."
+    },
+    "shedding_disabled": {
+      "message": "Load shedding is turned off."
+    },
+    "nothing_to_shed": {
+      "message": "No device could be shed (none is on, or all are already shed)."
+    }
+  },
+  "services": {
+    "restore_all": {
+      "name": "Restore all shed devices",
+      "description": "Turn back on every device that Namudri auto-shed (ignores min off time).",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional. If omitted, applies to all Namudri instances."
+        }
+      }
+    },
+    "force_shed": {
+      "name": "Force shed next device",
+      "description": "Turn off the next device in priority order right now (ignores the projection; needs load shedding enabled).",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional. If omitted, applies to all Namudri instances."
+        }
+      }
     }
   }
 }

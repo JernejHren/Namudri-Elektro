@@ -3,21 +3,34 @@
     "step": {
       "user": {
         "title": "Namudri Elektro",
-        "description": "Izberi Shelly (ali drug) senzor moči v W in senzor omrežninskega časovnega bloka (1–5).",
+        "description": "Izberi Shelly (ali drug) senzor moči v W in senzor tarifnega bloka omrežnine (1–5).",
         "data": {
           "name": "Ime",
           "power_sensor": "Senzor moči (W)",
           "tariff_sensor": "Senzor tarifnega bloka"
+        },
+        "data_description": {
+          "name": "Ime naprave, ki združuje vse entitete Namudri.",
+          "power_sensor": "Uvozna moč celotne hiše v W (izvoz se šteje kot 0 W).",
+          "tariff_sensor": "Senzor s trenutnim tarifnim blokom omrežnine (1–5), npr. iz Elektro Network Tariff."
         }
       },
       "shedding": {
         "title": "Omejitev porabe",
-        "description": "Neobvezno. Vrstni red = prioriteta (prva se izklopi najprej). Deluje samo v blokih 1 in 2. Prazno = samo monitoring. Izberi mobilne aplikacije (ali druge notify storitve), ki naj dobijo obvestilo ob vsakem izklopu/vklopu.",
+        "description": "Neobvezno. Vrstni red prioritete = vrstni red na seznamu (prva se izklopi prva). Deluje samo v tarifnih blokih 1 in 2. Prazno = samo monitoring. Izberi mobilne aplikacije (ali druge notify storitve), ki naj dobijo obvestilo ob vsakem izklopu/vklopu.",
         "data": {
           "devices": "Naprave (po prioriteti)",
           "notify_services": "Obvestila (izberi telefone)"
+        },
+        "data_description": {
+          "devices": "Stikala, klime ali bojlerji, ki jih je dovoljeno izklopiti. Prva na seznamu se izklopi prva.",
+          "notify_services": "Notify storitve, ki dobijo sporočilo ob vsakem izklopu in vklopu. Prazno = brez obvestil."
         }
       }
+    },
+    "error": {
+      "sensor_not_found": "Ta entiteta ne obstaja.",
+      "same_sensor": "Senzor moči in senzor tarife morata biti različna."
     },
     "abort": {
       "already_configured": "Ta kombinacija senzorjev je že nastavljena."
@@ -31,48 +44,144 @@
           "name": "Ime",
           "power_sensor": "Senzor moči (W)",
           "tariff_sensor": "Senzor tarifnega bloka"
+        },
+        "data_description": {
+          "name": "Ime naprave, ki združuje vse entitete Namudri.",
+          "power_sensor": "Uvozna moč celotne hiše v W (izvoz se šteje kot 0 W).",
+          "tariff_sensor": "Senzor s trenutnim tarifnim blokom omrežnine (1–5), npr. iz Elektro Network Tariff."
         }
       },
       "shedding": {
         "title": "Namudri Elektro — omejitev porabe",
-        "description": "Vrstni red = prioriteta. Izklop samo v blokih 1 in 2.",
+        "description": "Vrstni red prioritete = vrstni red na seznamu. Omejitev deluje samo v blokih 1 in 2.",
         "data": {
           "devices": "Naprave (po prioriteti)",
           "notify_services": "Obvestila (izberi telefone)"
+        },
+        "data_description": {
+          "devices": "Stikala, klime ali bojlerji, ki jih je dovoljeno izklopiti. Prva na seznamu se izklopi prva.",
+          "notify_services": "Notify storitve, ki dobijo sporočilo ob vsakem izklopu in vklopu. Prazno = brez obvestil."
         }
       }
+    },
+    "error": {
+      "sensor_not_found": "Ta entiteta ne obstaja.",
+      "same_sensor": "Senzor moči in senzor tarife morata biti različna."
     }
   },
   "entity": {
     "sensor": {
-      "projected_power": { "name": "Projekcija 15 min moči" },
-      "running_average": { "name": "Tekoče 15 min povprečje" },
-      "completed_window": { "name": "Zaključeno 15 min povprečje" },
-      "agreed_power": { "name": "Dogovorjena moč (trenutni blok)" },
-      "headroom": { "name": "Razpoložljiva moč" },
-      "tariff_block": { "name": "Tarifni blok" },
-      "shed_device_count": { "name": "Število izklopljenih naprav" }
+      "projected_power": {
+        "name": "Projekcija 15 min moči"
+      },
+      "running_average": {
+        "name": "Tekoče 15 min povprečje"
+      },
+      "completed_window": {
+        "name": "Zaključeno 15 min povprečje"
+      },
+      "agreed_power": {
+        "name": "Dogovorjena moč (trenutni blok)"
+      },
+      "headroom": {
+        "name": "Razpoložljiva moč"
+      },
+      "tariff_block": {
+        "name": "Tarifni blok"
+      },
+      "shed_device_count": {
+        "name": "Število izklopljenih naprav"
+      }
     },
     "binary_sensor": {
-      "over_agreed_power": { "name": "Nad dogovorjeno močjo" },
-      "shedding_active": { "name": "Omejitev aktivna" }
+      "over_agreed_power": {
+        "name": "Nad dogovorjeno močjo"
+      },
+      "shedding_active": {
+        "name": "Omejitev aktivna"
+      }
     },
     "switch": {
-      "load_shedding": { "name": "Omejitev porabe" }
+      "load_shedding": {
+        "name": "Omejitev porabe"
+      }
     },
     "number": {
-      "agreed_power_t1": { "name": "Dogovorjena moč T1" },
-      "agreed_power_t2": { "name": "Dogovorjena moč T2" },
-      "agreed_power_t3": { "name": "Dogovorjena moč T3" },
-      "agreed_power_t4": { "name": "Dogovorjena moč T4" },
-      "agreed_power_t5": { "name": "Dogovorjena moč T5" },
-      "shed_threshold": { "name": "Prag za izklop" },
-      "shed_hysteresis": { "name": "Histereza za vklop" },
-      "min_off_minutes": { "name": "Minimalni čas izklopa" },
-      "stabilization_seconds": { "name": "Stabilizacija projekcije" },
-      "max_off_minutes": { "name": "Največji čas izklopa" },
-      "power_smoothing": { "name": "Glajenje moči" },
-      "sensor_timeout": { "name": "Časovna omejitev senzorja" }
+      "agreed_power_t1": {
+        "name": "Dogovorjena moč T1"
+      },
+      "agreed_power_t2": {
+        "name": "Dogovorjena moč T2"
+      },
+      "agreed_power_t3": {
+        "name": "Dogovorjena moč T3"
+      },
+      "agreed_power_t4": {
+        "name": "Dogovorjena moč T4"
+      },
+      "agreed_power_t5": {
+        "name": "Dogovorjena moč T5"
+      },
+      "shed_threshold": {
+        "name": "Prag za izklop"
+      },
+      "shed_hysteresis": {
+        "name": "Histereza za vklop"
+      },
+      "min_off_minutes": {
+        "name": "Minimalni čas izklopa"
+      },
+      "stabilization_seconds": {
+        "name": "Stabilizacija projekcije"
+      },
+      "max_off_minutes": {
+        "name": "Največji čas izklopa"
+      },
+      "power_smoothing": {
+        "name": "Glajenje moči"
+      },
+      "sensor_timeout": {
+        "name": "Časovna omejitev senzorja"
+      }
+    }
+  },
+  "exceptions": {
+    "source_entity_not_found": {
+      "message": "Izvorna entiteta {entity_id} (še) ne obstaja. Home Assistant bo poskusil znova."
+    },
+    "entry_not_found": {
+      "message": "Ni naložene postavke Namudri Elektro z ID {entry_id}."
+    },
+    "no_loaded_entry": {
+      "message": "Namudri Elektro ni nastavljen."
+    },
+    "shedding_disabled": {
+      "message": "Omejitev porabe je izklopljena."
+    },
+    "nothing_to_shed": {
+      "message": "Nobene naprave ni bilo mogoče izklopiti (nobena ni vklopljena ali so vse že izklopljene)."
+    }
+  },
+  "services": {
+    "restore_all": {
+      "name": "Obnovi vse izklopljene naprave",
+      "description": "Vklopi vsako napravo, ki jo je Namudri avtomatsko izklopil (ne upošteva minimalnega časa izklopa).",
+      "fields": {
+        "entry_id": {
+          "name": "ID postavke",
+          "description": "Neobvezno. Če ni podan, velja za vse instance Namudri."
+        }
+      }
+    },
+    "force_shed": {
+      "name": "Takoj izklopi naslednjo napravo",
+      "description": "Takoj izklopi naslednjo napravo po prioriteti (ne upošteva projekcije; omejitev porabe mora biti vklopljena).",
+      "fields": {
+        "entry_id": {
+          "name": "ID postavke",
+          "description": "Neobvezno. Če ni podan, velja za vse instance Namudri."
+        }
+      }
     }
   }
 }
